@@ -57,6 +57,7 @@ class Config:
     quality_visible: bool = False
 
     quality_preset: QualityPreset = "cinematic"
+    font_scale: float = 1.0
     #: ``None`` 表示跟隨 Windows 的「顯示動畫」系統設定。
     reduce_motion: bool | None = None
     cinema_mode: bool = False
@@ -93,6 +94,7 @@ class Config:
         """把任何不合理的值拉回合法範圍。設定檔是使用者可編輯的，不能信任。"""
         self.volume = min(max(float(self.volume), 0.0), 1.0)
         self.current_position = max(0.0, float(self.current_position))
+        self.font_scale = min(max(float(self.font_scale), 0.8), 1.35)
 
         if self.repeat not in _REPEAT_MODES:
             self.repeat = "off"

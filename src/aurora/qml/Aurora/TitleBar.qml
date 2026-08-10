@@ -17,16 +17,21 @@ Item {
     signal miniModeRequested()
     signal closeRequested()
     signal cinemaToggled()
+    signal fullscreenToggled()
     signal presetCycled()
 
     implicitHeight: 46
 
-    // 拖曳整條標題列移動視窗
-    TapHandler {
-        gesturePolicy: TapHandler.DragThreshold
-        onPressedChanged: {
-            if (pressed) {
-                Window.window.startSystemMove();
+    Item {
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.right: windowActions.left
+        anchors.rightMargin: 8
+        TapHandler {
+            gesturePolicy: TapHandler.DragThreshold
+            onPressedChanged: {
+                if (pressed) { Window.window.startSystemMove(); }
             }
         }
     }
@@ -56,7 +61,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             text: Strings.appName
             color: "white"
-            font.pixelSize: 13
+            font.pixelSize: (13) * Appearance.fontScale
             font.letterSpacing: 3.4
             font.weight: Font.DemiBold
         }
@@ -65,12 +70,13 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             text: Strings.appSubtitle
             color: Qt.rgba(1, 1, 1, 0.42)
-            font.pixelSize: 11
+            font.pixelSize: (11) * Appearance.fontScale
             font.letterSpacing: 1.2
         }
     }
 
     Row {
+        id: windowActions
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
         spacing: 2
@@ -80,7 +86,7 @@ Item {
             visible: root.showFps
             text: root.fps.toFixed(0) + " fps"
             color: root.fps < 45 ? "#FF7A6B" : Qt.rgba(1, 1, 1, 0.45)
-            font.pixelSize: 10
+            font.pixelSize: (10) * Appearance.fontScale
             rightPadding: 8
         }
 
@@ -97,7 +103,7 @@ Item {
                 anchors.centerIn: parent
                 text: root.presetLabel
                 color: Qt.rgba(1, 1, 1, 0.8)
-                font.pixelSize: 10
+                font.pixelSize: (10) * Appearance.fontScale
                 font.letterSpacing: 0.8
             }
             HoverHandler { id: presetHover; cursorShape: Qt.PointingHandCursor }
@@ -111,6 +117,12 @@ Item {
             icon: "cinema"; flat: true; width: 34; height: 34; iconScale: 0.8
             color: "white"; glow: root.accent
             onClicked: root.cinemaToggled()
+        }
+        IconButton {
+            anchors.verticalCenter: parent.verticalCenter
+            icon: "fullscreen"; flat: true; width: 34; height: 34; iconScale: 0.8
+            color: "white"; glow: root.accent
+            onClicked: root.fullscreenToggled()
         }
         IconButton {
             anchors.verticalCenter: parent.verticalCenter

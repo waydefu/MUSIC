@@ -1,6 +1,7 @@
 module Aurora
 
 singleton Motion 1.0 Motion.qml
+singleton Appearance 1.0 Appearance.qml
 singleton Strings 1.0 Strings.qml
 
 Backdrop 1.0 Backdrop.qml
@@ -15,6 +16,7 @@ PlaylistPanel 1.0 PlaylistPanel.qml
 PostStack 1.0 PostStack.qml
 QualityPanel 1.0 QualityPanel.qml
 SeekBar 1.0 SeekBar.qml
+SettingsPanel 1.0 SettingsPanel.qml
 SpectrumBars 1.0 SpectrumBars.qml
 TitleBar 1.0 TitleBar.qml
 Toast 1.0 Toast.qml

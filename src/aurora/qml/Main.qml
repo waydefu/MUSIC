@@ -18,10 +18,10 @@ Window {
 
     width: 1180
     height: 760
-    minimumWidth: 880
-    minimumHeight: 560
+    minimumWidth: miniMode ? 360 : 880
+    minimumHeight: miniMode ? 150 : 560
     visible: true
-    color: "transparent"
+    color: introDone ? "transparent" : "#06110C"
     flags: Qt.Window | Qt.FramelessWindowHint
     title: Strings.appName + " " + Strings.appSubtitle
 
@@ -34,7 +34,15 @@ Window {
 
     // 進場動畫不能是內容可見性的唯一前提。若某張顯示卡的 effect 初始化
     // 較慢或某個繫結失敗，視窗仍必須立即有可操作的內容。
-    Component.onCompleted: introAnimation.start()
+    Component.onCompleted: {
+        Appearance.fontScale = player.fontScale;
+        if (player.miniMode) {
+            miniMode = true;
+            width = 460;
+            height = 168;
+        }
+        introAnimation.start();
+    }
 
     Binding {
         target: Motion
@@ -59,7 +67,7 @@ Window {
     Item {
         id: shell
         anchors.fill: parent
-        anchors.margins: window.shadowMargin
+        anchors.margins: window.fullScreen ? 0 : window.shadowMargin
         opacity: 1
         scale: 1
 
@@ -100,6 +108,7 @@ Window {
         Item {
             id: content
             anchors.fill: parent
+            visible: !window.miniMode
 
             TitleBar {
                 id: titleBar
@@ -115,7 +124,8 @@ Window {
                 onCloseRequested: window.close()
                 onPresetCycled: motion.cyclePreset()
                 onCinemaToggled: window.cinema = !window.cinema
-                onMiniModeRequested: toast.show("迷你模式即將登場")
+                onFullscreenToggled: window.toggleFullscreen()
+                onMiniModeRequested: window.toggleMiniMode()
             }
 
             // 左側：封面與曲目資訊
@@ -155,7 +165,7 @@ Window {
                         width: parent.width
                         text: player.title
                         color: "white"
-                        font.pixelSize: 26
+                        font.pixelSize: (26) * Appearance.fontScale
                         font.weight: Font.DemiBold
                         font.letterSpacing: 0.3
                     }
@@ -164,7 +174,7 @@ Window {
                         width: parent.width
                         text: player.artist + (player.album ? " · " + player.album : "")
                         color: Qt.rgba(1, 1, 1, 0.62)
-                        font.pixelSize: 13
+                        font.pixelSize: (13) * Appearance.fontScale
                         elide: Text.ElideRight
                     }
 
@@ -187,7 +197,7 @@ Window {
                                 anchors.centerIn: parent
                                 text: player.sourceSummary
                                 color: Qt.rgba(1, 1, 1, 0.82)
-                                font.pixelSize: 11
+                                font.pixelSize: (11) * Appearance.fontScale
                                 font.letterSpacing: 0.4
                             }
                         }
@@ -224,19 +234,19 @@ Window {
                                     anchors.verticalCenter: parent.verticalCenter
                                     text: player.quality.codecName
                                     color: "white"
-                                    font.pixelSize: 11
+                                    font.pixelSize: (11) * Appearance.fontScale
                                     font.weight: Font.DemiBold
                                 }
                                 Text {
                                     anchors.verticalCenter: parent.verticalCenter
                                     text: player.quality.codecBadge
                                     color: Qt.rgba(1, 1, 1, 0.55)
-                                    font.pixelSize: 9
+                                    font.pixelSize: (9) * Appearance.fontScale
                                 }
                             }
 
                             HoverHandler { cursorShape: Qt.PointingHandCursor }
-                            TapHandler { onTapped: window.qualityOpen = !window.qualityOpen }
+                            TapHandler { onTapped: window.togglePanel("quality") }
                         }
                     }
                 }
@@ -265,7 +275,8 @@ Window {
                     accent2: window.accent2
                     bloomEnabled: motion.bloomEnabled
                     bloomStrength: motion.bloomStrength
-                    opacity: window.lyricsOpen || window.playlistOpen || window.libraryOpen ? 0.25 : 1.0
+                    opacity: window.lyricsOpen || window.playlistOpen || window.libraryOpen || window.qualityOpen || window.settingsOpen
+                             ? 0.25 : 1.0
                     Behavior on opacity { NumberAnimation { duration: Motion.panel } }
                 }
 
@@ -278,12 +289,13 @@ Window {
 
                 PlaylistPanel {
                     anchors.fill: parent
-                    model: player.playlist
-                    currentIndex: player.index
+                    model: player.filteredPlaylist
+                    currentPath: player.currentPath
                     accent: window.accent
                     open: window.playlistOpen
-                    onActivated: (row) => player.playIndex(row)
-                    onRemoved: (row) => player.removeAt(row)
+                    onActivated: (row) => player.playFilteredIndex(row)
+                    onRemoved: (row) => player.removeFilteredAt(row)
+                    onSearchChanged: (query) => player.setPlaylistSearch(query)
                 }
 
                 LibraryPanel {
@@ -300,6 +312,13 @@ Window {
                     controller: player.quality
                     accent: window.accent
                     open: window.qualityOpen
+                }
+
+                SettingsPanel {
+                    anchors.fill: parent
+                    controller: player
+                    accent: window.accent
+                    open: window.settingsOpen
                 }
             }
 
@@ -331,7 +350,7 @@ Window {
                     anchors.verticalCenter: seek.verticalCenter
                     text: player.positionText
                     color: Qt.rgba(1, 1, 1, 0.75)
-                    font.pixelSize: 11
+                    font.pixelSize: (11) * Appearance.fontScale
                     font.family: "Consolas"
                 }
                 Text {
@@ -340,7 +359,7 @@ Window {
                     anchors.verticalCenter: seek.verticalCenter
                     text: player.durationText
                     color: Qt.rgba(1, 1, 1, 0.45)
-                    font.pixelSize: 11
+                    font.pixelSize: (11) * Appearance.fontScale
                     font.family: "Consolas"
                 }
 
@@ -400,11 +419,90 @@ Window {
                         active: window.qualityOpen
                         onClicked: window.togglePanel("quality")
                     }
+                    IconButton {
+                        icon: "settings"; flat: true; width: 38; height: 38; iconScale: 0.8
+                        color: "white"; glow: window.accent
+                        active: window.settingsOpen
+                        onClicked: window.togglePanel("settings")
+                    }
                 }
             }
         }
 
         // -------------------------------------------------------- 電影感疊加
+
+        Item {
+            id: miniPlayer
+            anchors.fill: parent
+            anchors.margins: 14
+            visible: window.miniMode
+            Row {
+                anchors.fill: parent
+                spacing: 12
+                Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 104; height: 104; radius: 12
+                    color: Qt.rgba(window.accent.r, window.accent.g, window.accent.b, 0.20)
+                    border.width: 1
+                    border.color: Qt.rgba(window.accent.r, window.accent.g, window.accent.b, 0.55)
+                    Image {
+                        anchors.fill: parent; anchors.margins: 2
+                        source: player.coverUrl; fillMode: Image.PreserveAspectCrop
+                        asynchronous: true; visible: source !== ""
+                    }
+                    Text {
+                        anchors.centerIn: parent; visible: player.coverUrl === ""
+                        text: "♫"; color: Qt.rgba(1, 1, 1, 0.70); font.pixelSize: 38
+                    }
+                }
+                Column {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - 116
+                    spacing: 7
+                    Row {
+                        width: parent.width
+                        Text {
+                            width: parent.width - actions.width - 8
+                            text: player.title; color: "white"; font.pixelSize: 16
+                            font.weight: Font.DemiBold; elide: Text.ElideRight
+                        }
+                        Row {
+                            id: actions
+                            spacing: 2
+                            IconButton {
+                                icon: "fullscreen"; flat: true; width: 28; height: 28; iconScale: 0.62
+                                color: "white"; glow: window.accent; onClicked: window.toggleMiniMode()
+                            }
+                            IconButton {
+                                icon: "close"; flat: true; width: 28; height: 28; iconScale: 0.62
+                                color: "white"; glow: "#FF5F57"; onClicked: window.close()
+                            }
+                        }
+                    }
+                    Text {
+                        width: parent.width
+                        text: player.artist + (player.album ? " · " + player.album : "")
+                        color: Qt.rgba(1, 1, 1, 0.55); font.pixelSize: 11; elide: Text.ElideRight
+                    }
+                    Row {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        spacing: 10
+                        IconButton {
+                            icon: "prev"; flat: true; width: 32; height: 32; iconScale: 0.72
+                            color: "white"; glow: window.accent; onClicked: player.playPrevious()
+                        }
+                        IconButton {
+                            icon: player.playing ? "pause" : "play"; flat: false; width: 38; height: 38
+                            color: "white"; glow: window.accent; onClicked: player.togglePlay()
+                        }
+                        IconButton {
+                            icon: "next"; flat: true; width: 32; height: 32; iconScale: 0.72
+                            color: "white"; glow: window.accent; onClicked: player.playNext()
+                        }
+                    }
+                }
+            }
+        }
 
         PostStack {
             anchors.fill: parent
@@ -446,6 +544,48 @@ Window {
 
         // -------------------------------------------------------- 提示
 
+        Item {
+            id: startup
+            anchors.fill: parent
+            z: 100
+            visible: !window.introDone
+            opacity: 1
+            Rectangle { anchors.fill: parent; color: "#06110C" }
+            Item {
+                id: startupMark
+                anchors.centerIn: parent
+                width: 180; height: 180
+                scale: 0.72; opacity: 0
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 128; height: 128; radius: 64
+                    color: Qt.rgba(window.accent.r, window.accent.g, window.accent.b, 0.12)
+                    border.width: 1
+                    border.color: Qt.rgba(window.accent.r, window.accent.g, window.accent.b, 0.80)
+                }
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 96; height: 96; radius: 48
+                    color: Qt.rgba(window.accent.r, window.accent.g, window.accent.b, 0.16)
+                }
+                Text {
+                    anchors.centerIn: parent; text: "♫"; color: "white"; font.pixelSize: 54
+                }
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.bottom; anchors.topMargin: 16
+                    text: Strings.appName; color: "white"; font.pixelSize: 18
+                    font.letterSpacing: 7; font.weight: Font.DemiBold
+                }
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.bottom; anchors.topMargin: 44
+                    text: Strings.appSubtitle; color: Qt.rgba(1, 1, 1, 0.46); font.pixelSize: 11
+                    font.letterSpacing: 2
+                }
+            }
+        }
+
         Toast {
             id: toast
             anchors.top: parent.top
@@ -477,7 +617,7 @@ Window {
                     anchors.centerIn: parent
                     text: Strings.dropHere
                     color: "white"
-                    font.pixelSize: 18
+                    font.pixelSize: (18) * Appearance.fontScale
                     font.weight: Font.DemiBold
                 }
             }
@@ -490,17 +630,46 @@ Window {
     property bool libraryOpen: false
     property bool lyricsOpen: false
     property bool qualityOpen: false
+    property bool settingsOpen: false
     property bool cinema: false
+    property bool fullScreen: false
+    property bool miniMode: false
+    property int normalWidth: 1180
+    property int normalHeight: 760
+
+    function toggleFullscreen() {
+        if (miniMode) { toggleMiniMode(); }
+        const next = visibility !== Window.FullScreen;
+        fullScreen = next;
+        visibility = next ? Window.FullScreen : Window.Windowed;
+    }
+
+    onVisibilityChanged: {
+        if (visibility !== Window.FullScreen) { fullScreen = false; }
+    }
+
+    function toggleMiniMode() {
+        if (miniMode) {
+            miniMode = false; width = normalWidth; height = normalHeight;
+        } else {
+            if (fullScreen) { toggleFullscreen(); }
+            normalWidth = width; normalHeight = height;
+            miniMode = true; width = 460; height = 168;
+        }
+        player.setMiniMode(miniMode);
+    }
 
     function togglePanel(name) {
         const wasOpen = (name === "playlist" && playlistOpen)
                      || (name === "library" && libraryOpen)
                      || (name === "lyrics" && lyricsOpen)
-                     || (name === "quality" && qualityOpen);
+                     || (name === "quality" && qualityOpen)
+                     || (name === "settings" && settingsOpen);
         playlistOpen = !wasOpen && name === "playlist";
         libraryOpen = !wasOpen && name === "library";
         lyricsOpen = !wasOpen && name === "lyrics";
         qualityOpen = !wasOpen && name === "quality";
+        settingsOpen = !wasOpen && name === "settings";
     }
 
     FileDialog {
@@ -526,6 +695,16 @@ Window {
         function onToast(message) {
             toast.show(message, false);
         }
+        function onLibraryFolderAdded() {
+            window.libraryOpen = true;
+            window.playlistOpen = false;
+            window.lyricsOpen = false;
+            window.qualityOpen = false;
+            window.settingsOpen = false;
+        }
+        function onFontScaleChanged() {
+            Appearance.fontScale = player.fontScale;
+        }
     }
 
     Connections {
@@ -549,17 +728,26 @@ Window {
 
     // ------------------------------------------------------------ 啟動進場
 
-    ParallelAnimation {
+    SequentialAnimation {
         id: introAnimation
-        NumberAnimation {
-            target: shell; property: "opacity"
-            from: 0; to: 1; duration: Motion.intro
-            easing.type: Easing.OutExpo
+        ParallelAnimation {
+            NumberAnimation {
+                target: startupMark; property: "opacity"
+                from: 0; to: 1; duration: Motion.intro * 0.48
+                easing.type: Easing.OutExpo
+            }
+            NumberAnimation {
+                target: startupMark; property: "scale"
+                from: 0.72; to: 1.0; duration: Motion.intro * 0.60
+                easing.type: Easing.OutBack
+                easing.overshoot: Motion.overshoot
+            }
         }
+        PauseAnimation { duration: 180 }
         NumberAnimation {
-            target: shell; property: "scale"
-            from: 0.94; to: 1.0; duration: Motion.intro
-            easing.type: Easing.OutExpo
+            target: startup; property: "opacity"
+            from: 1; to: 0; duration: Motion.intro * 0.38
+            easing.type: Easing.InQuad
         }
         onFinished: window.introDone = true
     }
@@ -574,22 +762,30 @@ Window {
     Shortcut { sequence: "Up"; onActivated: player.bumpVolume(0.05) }
     Shortcut { sequence: "Down"; onActivated: player.bumpVolume(-0.05) }
     Shortcut { sequence: "M"; onActivated: player.toggleMute() }
+    Shortcut { sequence: "Ctrl+M"; onActivated: window.toggleMiniMode() }
     Shortcut { sequence: "L"; onActivated: window.togglePanel("lyrics") }
     Shortcut { sequence: "Ctrl+L"; onActivated: window.togglePanel("library") }
     Shortcut { sequence: "Ctrl+O"; onActivated: libraryFolderDialog.open() }
     Shortcut { sequence: "P"; onActivated: window.togglePanel("playlist") }
     Shortcut { sequence: "I"; onActivated: window.togglePanel("quality") }
+    Shortcut { sequence: "Ctrl+,"; onActivated: window.togglePanel("settings") }
     Shortcut { sequence: "C"; onActivated: window.cinema = !window.cinema }
+    Shortcut { sequence: "F11"; onActivated: window.toggleFullscreen() }
     Shortcut {
         sequence: "Escape"
         onActivated: {
-            if (window.cinema) {
+            if (window.miniMode) {
+                window.toggleMiniMode();
+            } else if (window.fullScreen) {
+                window.toggleFullscreen();
+            } else if (window.cinema) {
                 window.cinema = false;
             } else {
                 window.playlistOpen = false;
                 window.libraryOpen = false;
                 window.lyricsOpen = false;
                 window.qualityOpen = false;
+                window.settingsOpen = false;
             }
         }
     }

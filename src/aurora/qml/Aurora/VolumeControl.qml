@@ -79,7 +79,7 @@ Row {
                 anchors.centerIn: parent
                 text: Math.round(slider.shown * 100) + "%"
                 color: "white"
-                font.pixelSize: 10
+                font.pixelSize: (10) * Appearance.fontScale
             }
         }
 

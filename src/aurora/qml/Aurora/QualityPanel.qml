@@ -32,7 +32,7 @@ Item {
             anchors.margins: 18
             text: Strings.quality
             color: "white"
-            font.pixelSize: 13
+            font.pixelSize: (13) * Appearance.fontScale
             font.letterSpacing: 2.2
             font.weight: Font.DemiBold
         }
@@ -43,7 +43,7 @@ Item {
             anchors.verticalCenter: header.verticalCenter
             text: root.controller ? "★".repeat(root.controller.stars) : ""
             color: root.accent
-            font.pixelSize: 15
+            font.pixelSize: (15) * Appearance.fontScale
             font.letterSpacing: 1
         }
 
@@ -83,7 +83,7 @@ Item {
                             width: parent.width
                             text: root.controller ? root.controller.deviceName : "—"
                             color: "white"
-                            font.pixelSize: 15
+                            font.pixelSize: (15) * Appearance.fontScale
                             font.weight: Font.DemiBold
                             elide: Text.ElideRight
                         }
@@ -92,7 +92,7 @@ Item {
                                   ? root.controller.transportLabel + " · " + root.controller.endpointFormat
                                   : "—"
                             color: Qt.rgba(1, 1, 1, 0.48)
-                            font.pixelSize: 11
+                            font.pixelSize: (11) * Appearance.fontScale
                         }
                     }
                 }
@@ -100,7 +100,7 @@ Item {
                 Text {
                     text: Strings.signalChain
                     color: Qt.rgba(1, 1, 1, 0.58)
-                    font.pixelSize: 10
+                    font.pixelSize: (10) * Appearance.fontScale
                     font.letterSpacing: 1.2
                     font.weight: Font.DemiBold
                 }
@@ -135,14 +135,14 @@ Item {
                                     width: parent.width
                                     text: modelData.label
                                     color: "white"
-                                    font.pixelSize: 12
+                                    font.pixelSize: (12) * Appearance.fontScale
                                     elide: Text.ElideRight
                                 }
                                 Text {
                                     width: parent.width
                                     text: modelData.detail + " · " + modelData.badge
                                     color: Qt.rgba(1, 1, 1, 0.45)
-                                    font.pixelSize: 11
+                                    font.pixelSize: (11) * Appearance.fontScale
                                     wrapMode: Text.Wrap
                                 }
                             }
@@ -154,7 +154,7 @@ Item {
                     visible: root.controller && root.controller.measurementProgress !== ""
                     text: root.controller ? root.controller.measurementProgress : ""
                     color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.86)
-                    font.pixelSize: 11
+                    font.pixelSize: (11) * Appearance.fontScale
                 }
 
                 Repeater {
@@ -173,7 +173,7 @@ Item {
                             anchors.margins: 10
                             text: modelData
                             color: "#FFB1A8"
-                            font.pixelSize: 11
+                            font.pixelSize: (11) * Appearance.fontScale
                             wrapMode: Text.Wrap
                         }
                     }
@@ -186,7 +186,7 @@ Item {
                     Text {
                         text: Strings.codecReasons
                         color: Qt.rgba(1, 1, 1, 0.58)
-                        font.pixelSize: 10
+                        font.pixelSize: (10) * Appearance.fontScale
                         font.letterSpacing: 1.2
                         font.weight: Font.DemiBold
                     }
@@ -197,7 +197,7 @@ Item {
                             width: parent.width
                             text: "• " + modelData
                             color: Qt.rgba(1, 1, 1, 0.42)
-                            font.pixelSize: 11
+                            font.pixelSize: (11) * Appearance.fontScale
                             wrapMode: Text.Wrap
                         }
                     }

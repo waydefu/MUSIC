@@ -27,6 +27,8 @@ def main() -> int:
         "--onedir",
         "--name",
         "AURORA",
+        "--icon",
+        str(ROOT / "data" / "aurora-icon.ico"),
         "--paths",
         str(ROOT / "src"),
         "--add-data",

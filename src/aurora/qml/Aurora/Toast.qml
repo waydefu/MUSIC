@@ -69,7 +69,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 text: root._current
                 color: "white"
-                font.pixelSize: 12
+                font.pixelSize: (12) * Appearance.fontScale
                 elide: Text.ElideRight
                 width: Math.min(implicitWidth, root.width - 80)
             }

@@ -16,6 +16,7 @@ from PySide6.QtCore import (
     QModelIndex,
     QObject,
     QPersistentModelIndex,
+    QSortFilterProxyModel,
     Qt,
 )
 
@@ -159,6 +160,45 @@ class PlaylistModel(QAbstractListModel):
             if track.path.lower() == lowered:
                 return row
         return -1
+
+
+class PlaylistFilterProxy(QSortFilterProxyModel):
+    """播放清單的即時搜尋代理，保留來源列索引供播放與刪除使用。"""
+
+    def __init__(self, source: PlaylistModel, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._query = ""
+        self.setSourceModel(source)
+
+    def set_query(self, query: str) -> None:
+        normalized = query.strip().casefold()
+        if normalized == self._query:
+            return
+        self.beginFilterChange()
+        self._query = normalized
+        self.endFilterChange(QSortFilterProxyModel.Direction.Rows)
+
+    def source_row(self, proxy_row: int) -> int:
+        index = self.index(proxy_row, 0)
+        if not index.isValid():
+            return -1
+        return self.mapToSource(index).row()
+
+    def filterAcceptsRow(
+        self,
+        source_row: int,
+        source_parent: QModelIndex | QPersistentModelIndex,
+    ) -> bool:
+        if not self._query:
+            return True
+        source = self.sourceModel()
+        if not isinstance(source, PlaylistModel):
+            return False
+        track = source.track_at(source_row)
+        if track is None:
+            return False
+        haystack = " ".join((track.display_title, track.display_artist, track.album, track.path))
+        return self._query in haystack.casefold()
 
 
 _LINE_TEXT_ROLE = Qt.ItemDataRole.UserRole + 1

@@ -22,14 +22,14 @@ from PySide6.QtCore import Property, QObject, QTimer, QUrl, Signal, Slot
 
 from aurora.audio.engine import AudioEngine
 from aurora.bridge.lyrics import LyricsController
-from aurora.bridge.models import PlaylistModel, SpectrumModel
+from aurora.bridge.models import PlaylistFilterProxy, PlaylistModel, SpectrumModel
 from aurora.bridge.quality import QualityController
 from aurora.bridge.theme import ThemeController
 from aurora.core.config import Config, save_config
 from aurora.core.constants import AUDIO_EXTENSIONS, SEEK_STEP_SEC, UI_TICK_HZ, VOLUME_STEP
 from aurora.core.models import Track
 from aurora.library.metadata import read_track
-from aurora.library.scanner import group_audio_files, iter_audio_files
+from aurora.library.scanner import group_audio_files
 
 _REPEAT_ORDER = ("off", "all", "one")
 _REPEAT_LABEL = {"off": "不循環", "all": "全部循環", "one": "單曲循環"}
@@ -54,6 +54,9 @@ class PlayerController(QObject):
     repeatChanged = Signal()
     indexChanged = Signal()
     libraryChanged = Signal()
+    libraryFolderAdded = Signal()
+    miniModeChanged = Signal()
+    fontScaleChanged = Signal()
     toast = Signal(str)
     beat = Signal()
 
@@ -62,6 +65,7 @@ class PlayerController(QObject):
         self._config = config
         self._engine = AudioEngine()
         self._playlist = PlaylistModel(self)
+        self._filtered_playlist = PlaylistFilterProxy(self._playlist, self)
         self._spectrum = SpectrumModel(self)
         self._theme = ThemeController(self)
         self._lyrics = LyricsController(self)
@@ -90,6 +94,10 @@ class PlayerController(QObject):
         return self._playlist
 
     @Property(QObject, constant=True)
+    def filteredPlaylist(self) -> PlaylistFilterProxy:
+        return self._filtered_playlist
+
+    @Property(QObject, constant=True)
     def spectrum(self) -> SpectrumModel:
         return self._spectrum
 
@@ -104,6 +112,14 @@ class PlayerController(QObject):
     @Property(QObject, constant=True)
     def quality(self) -> QualityController:
         return self._quality
+
+    @Property(bool, notify=miniModeChanged)
+    def miniMode(self) -> bool:
+        return self._config.mini_mode
+
+    @Property(float, notify=fontScaleChanged)
+    def fontScale(self) -> float:
+        return self._config.font_scale
 
     @Property(list, notify=libraryChanged)
     def libraryPlaylists(self) -> list[dict[str, object]]:
@@ -143,6 +159,11 @@ class PlayerController(QObject):
     @Property(bool, notify=trackChanged)
     def hasTrack(self) -> bool:
         return self._track is not None
+
+    @Property(str, notify=trackChanged)
+    def currentPath(self) -> str:
+        track = self._track
+        return track.path if track else ""
 
     @Property(str, notify=trackChanged)
     def sourceSummary(self) -> str:
@@ -305,7 +326,11 @@ class PlayerController(QObject):
 
     @Slot("QVariantList")
     def addUrls(self, urls: list[QUrl] | list[str]) -> None:
-        """接收拖放進來的檔案或資料夾。資料夾會遞迴展開。"""
+        """接收拖放進來的檔案或資料夾。
+
+        資料夾代表一個固定音樂庫根目錄；其子資料夾會在音樂庫面板中各自成為歌單。
+        個別音檔才直接加進目前的播放清單，避免把大型音樂庫攤平成一張未分類清單。
+        """
         paths: list[str] = []
         for item in urls:
             local = item.toLocalFile() if isinstance(item, QUrl) else str(item)
@@ -313,7 +338,7 @@ class PlayerController(QObject):
                 continue
             target = Path(local)
             if target.is_dir():
-                paths.extend(str(found) for found in iter_audio_files([local]))
+                self._add_library_path(target)
             elif target.suffix.lower() in AUDIO_EXTENSIONS:
                 paths.append(local)
         self.addPaths(paths)
@@ -333,17 +358,54 @@ class PlayerController(QObject):
 
     @Slot(QUrl)
     def addLibraryFolder(self, folder: QUrl) -> None:
-        path = Path(folder.toLocalFile())
-        if not path.is_dir():
+        self._add_library_path(Path(folder.toLocalFile()))
+
+    @Slot(str)
+    def setPlaylistSearch(self, query: str) -> None:
+        self._filtered_playlist.set_query(query)
+
+    @Slot(int)
+    def playFilteredIndex(self, row: int) -> None:
+        source_row = self._filtered_playlist.source_row(row)
+        if source_row >= 0:
+            self.playIndex(source_row)
+
+    @Slot(int)
+    def removeFilteredAt(self, row: int) -> None:
+        source_row = self._filtered_playlist.source_row(row)
+        if source_row >= 0:
+            self.removeAt(source_row)
+
+    @Slot(bool)
+    def setMiniMode(self, enabled: bool) -> None:
+        if self._config.mini_mode == enabled:
             return
+        self._config.mini_mode = enabled
+        save_config(self._config)
+        self.miniModeChanged.emit()
+
+    @Slot(float)
+    def setFontScale(self, scale: float) -> None:
+        normalized = min(max(float(scale), 0.8), 1.35)
+        if abs(normalized - self._config.font_scale) < 1e-3:
+            return
+        self._config.font_scale = normalized
+        save_config(self._config)
+        self.fontScaleChanged.emit()
+
+    def _add_library_path(self, path: Path) -> bool:
+        if not path.is_dir():
+            return False
         resolved = str(path.resolve())
         if any(item.casefold() == resolved.casefold() for item in self._config.library_folders):
-            self.toast.emit("This music folder is already added.")
-            return
+            self.toast.emit("這個音樂資料夾已加入。")
+            return False
         self._config.library_folders.append(resolved)
         self._refresh_library()
         save_config(self._config)
-        self.toast.emit("Music folder added.")
+        self.libraryFolderAdded.emit()
+        self.toast.emit(f"已加入音樂庫：{path.name or resolved}")
+        return True
 
     @Slot(str)
     def playLibraryPlaylist(self, folder: str) -> None:

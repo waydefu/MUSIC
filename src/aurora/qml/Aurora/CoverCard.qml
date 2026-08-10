@@ -132,7 +132,7 @@ Item {
                 Text {
                     anchors.centerIn: parent
                     text: "♪"
-                    font.pixelSize: parent.width * 0.34
+                    font.pixelSize: (parent.width * 0.34) * Appearance.fontScale
                     color: Qt.rgba(1, 1, 1, 0.32)
                 }
             }

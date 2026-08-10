@@ -17,6 +17,7 @@ def test_round_trip_preserves_everything(tmp_path: Path) -> None:
         library_folders=[r"D:\music"],
         window=WindowGeometry(100, 200, 1400, 900),
         mini_mode=True,
+        font_scale=1.2,
         quality_preset="balanced",
         reduce_motion=True,
         cinema_mode=True,
@@ -64,6 +65,7 @@ def test_out_of_range_values_are_clamped(tmp_path: Path) -> None:
                 "current_position": -50.0,
                 "repeat": "亂填的模式",
                 "quality_preset": "ultra",
+                "font_scale": 9.0,
                 "window": {"x": 10, "y": 10, "width": 1, "height": 1},
             }
         ),
@@ -74,6 +76,7 @@ def test_out_of_range_values_are_clamped(tmp_path: Path) -> None:
     assert config.current_position == 0.0
     assert config.repeat == "off"
     assert config.quality_preset == "cinematic"
+    assert config.font_scale == 1.35
     assert config.window.width >= 720
     assert config.window.height >= 480
 

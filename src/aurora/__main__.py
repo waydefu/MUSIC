@@ -7,13 +7,13 @@ import sys
 from collections.abc import Sequence
 
 from PySide6.QtCore import QUrl
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtQml import QQmlApplicationEngine
 
 from aurora.bridge.motion import MotionController
 from aurora.bridge.player import PlayerController
 from aurora.core.config import Config, load_config
-from aurora.core.paths import qml_root
+from aurora.core.paths import data_file, qml_root
 
 
 def _configure_engine(
@@ -48,6 +48,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     options = parser.parse_args(argv)
 
     app = QGuiApplication(sys.argv[:1])
+    app.setWindowIcon(QIcon(str(data_file("aurora-icon.png"))))
     config = load_config()
     player = PlayerController(config)
     motion = MotionController(config)

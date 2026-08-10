@@ -11,11 +11,13 @@ Item {
 
     property var model: null
     property int currentIndex: -1
+    property string currentPath: ""
     property color accent: "#7B2FF7"
     property bool open: false
 
     signal activated(int row)
     signal removed(int row)
+    signal searchChanged(string query)
 
     visible: opacity > 0.01
     opacity: open ? 1.0 : 0.0
@@ -41,7 +43,7 @@ Item {
             anchors.margins: 18
             text: Strings.playlist
             color: "white"
-            font.pixelSize: 13
+            font.pixelSize: (13) * Appearance.fontScale
             font.letterSpacing: 2.2
             font.weight: Font.DemiBold
         }
@@ -52,7 +54,52 @@ Item {
             anchors.rightMargin: 18
             text: list.count + " 首"
             color: Qt.rgba(1, 1, 1, 0.4)
-            font.pixelSize: 11
+            font.pixelSize: (11) * Appearance.fontScale
+        }
+
+        Rectangle {
+            id: searchBox
+            anchors.top: header.bottom
+            anchors.topMargin: 12
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.margins: 14
+            height: 34
+            radius: 8
+            color: Qt.rgba(1, 1, 1, 0.075)
+            border.width: searchInput.activeFocus ? 1 : 0
+            border.color: root.accent
+            Text {
+                anchors.left: parent.left; anchors.leftMargin: 11
+                anchors.verticalCenter: parent.verticalCenter
+                text: "⌕"; color: root.accent; font.pixelSize: 19
+            }
+            TextInput {
+                id: searchInput
+                anchors.left: parent.left; anchors.leftMargin: 35
+                anchors.right: clearSearch.left; anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                color: "white"; font.pixelSize: 12; clip: true; selectByMouse: true
+                onTextChanged: root.searchChanged(text)
+                Keys.onEscapePressed: {
+                    if (text.length > 0) { text = ""; event.accepted = true; }
+                }
+            }
+            Text {
+                anchors.left: searchInput.left; anchors.verticalCenter: parent.verticalCenter
+                visible: searchInput.text.length === 0
+                text: "搜尋歌曲、演出者或專輯"
+                color: Qt.rgba(1, 1, 1, 0.34); font.pixelSize: 12
+            }
+            Text {
+                id: clearSearch
+                anchors.right: parent.right; anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                visible: searchInput.text.length > 0
+                text: "×"; color: Qt.rgba(1, 1, 1, 0.65); font.pixelSize: 18
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: searchInput.text = "" }
+            }
         }
 
         // 空狀態
@@ -64,20 +111,20 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: Strings.emptyPlaylist
                 color: Qt.rgba(1, 1, 1, 0.55)
-                font.pixelSize: 15
+                font.pixelSize: (15) * Appearance.fontScale
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: Strings.emptyPlaylistHint
                 color: Qt.rgba(1, 1, 1, 0.3)
-                font.pixelSize: 11
+                font.pixelSize: (11) * Appearance.fontScale
                 font.letterSpacing: 0.8
             }
         }
 
         ListView {
             id: list
-            anchors.top: header.bottom
+            anchors.top: searchBox.bottom
             anchors.topMargin: 12
             anchors.left: parent.left
             anchors.right: parent.right
@@ -92,12 +139,13 @@ Item {
             delegate: Item {
                 id: row
                 required property int index
+                required property string path
                 required property string title
                 required property string artist
                 required property string duration
                 required property bool lossless
 
-                readonly property bool isCurrent: index === root.currentIndex
+                readonly property bool isCurrent: path === root.currentPath
 
                 width: list.width
                 height: 52
@@ -181,7 +229,7 @@ Item {
                         width: parent.width
                         text: row.title
                         color: row.isCurrent ? root.accent : "white"
-                        font.pixelSize: 13
+                        font.pixelSize: (13) * Appearance.fontScale
                         font.weight: row.isCurrent ? Font.DemiBold : Font.Normal
                         elide: Text.ElideRight
                         Behavior on color { ColorAnimation { duration: Motion.hover } }
@@ -190,7 +238,7 @@ Item {
                         width: parent.width
                         text: row.artist
                         color: Qt.rgba(1, 1, 1, 0.42)
-                        font.pixelSize: 11
+                        font.pixelSize: (11) * Appearance.fontScale
                         elide: Text.ElideRight
                     }
                 }
@@ -211,7 +259,7 @@ Item {
                             anchors.centerIn: parent
                             text: "無損"
                             color: Qt.rgba(1, 1, 1, 0.6)
-                            font.pixelSize: 9
+                            font.pixelSize: (9) * Appearance.fontScale
                         }
                     }
 
@@ -219,7 +267,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         text: row.duration
                         color: Qt.rgba(1, 1, 1, 0.42)
-                        font.pixelSize: 11
+                        font.pixelSize: (11) * Appearance.fontScale
                         font.family: "Consolas"
                         visible: !hover.hovered
                     }

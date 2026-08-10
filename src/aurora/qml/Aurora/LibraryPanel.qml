@@ -34,7 +34,7 @@ Item {
             anchors.margins: 18
             text: Strings.library
             color: "white"
-            font.pixelSize: 13
+            font.pixelSize: (13) * Appearance.fontScale
             font.letterSpacing: 2.2
             font.weight: Font.DemiBold
         }
@@ -45,7 +45,7 @@ Item {
             anchors.verticalCenter: header.verticalCenter
             text: "+ 資料夾"
             color: root.accent
-            font.pixelSize: 11
+            font.pixelSize: (11) * Appearance.fontScale
             font.weight: Font.DemiBold
             HoverHandler { cursorShape: Qt.PointingHandCursor }
             TapHandler { onTapped: root.pickFolderRequested() }
@@ -60,14 +60,14 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "尚未加入音樂資料夾"
                 color: Qt.rgba(1, 1, 1, 0.60)
-                font.pixelSize: 16
+                font.pixelSize: (16) * Appearance.fontScale
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: parent.width
                 text: "加入後，每個子資料夾都會成為一張歌單"
                 color: Qt.rgba(1, 1, 1, 0.34)
-                font.pixelSize: 11
+                font.pixelSize: (11) * Appearance.fontScale
                 wrapMode: Text.WordWrap
                 horizontalAlignment: Text.AlignHCenter
             }
@@ -107,7 +107,7 @@ Item {
                         width: parent.width
                         text: entry.modelData.label
                         color: "white"
-                        font.pixelSize: 13
+                        font.pixelSize: (13) * Appearance.fontScale
                         font.weight: Font.DemiBold
                         elide: Text.ElideRight
                     }
@@ -115,7 +115,7 @@ Item {
                         width: parent.width
                         text: entry.modelData.count + " 首 · " + entry.modelData.path
                         color: Qt.rgba(1, 1, 1, 0.42)
-                        font.pixelSize: 10
+                        font.pixelSize: (10) * Appearance.fontScale
                         elide: Text.ElideMiddle
                     }
                 }

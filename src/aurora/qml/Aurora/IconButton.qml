@@ -12,7 +12,7 @@ Item {
     id: root
 
     /*! 圖示種類：play / pause / prev / next / shuffle / repeat / repeatOne /
-        volume / mute / folder / list / lyrics / info / close / minimise / mini / cinema */
+        volume / mute / folder / list / lyrics / info / settings / close / minimise / mini / cinema / fullscreen */
     property string icon: "play"
     property color color: "#FFFFFF"
     property color glow: "#FFFFFF"
@@ -33,6 +33,7 @@ Item {
         width: parent.width
         height: parent.height
         radius: width / 2
+        transformOrigin: Item.Center
         color: root.active
                ? Qt.rgba(root.glow.r, root.glow.g, root.glow.b, 0.22)
                : Qt.rgba(1, 1, 1, hover.hovered ? 0.13 : 0.0)
@@ -55,6 +56,7 @@ Item {
         width: pad.width + 10
         height: pad.height + 10
         radius: width / 2
+        transformOrigin: Item.Center
         color: "transparent"
         border.width: 1
         border.color: Qt.rgba(root.glow.r, root.glow.g, root.glow.b, 0.45)
@@ -75,6 +77,7 @@ Item {
         anchors.centerIn: parent
         width: 20 * root.iconScale
         height: 20 * root.iconScale
+        transformOrigin: Item.Center
         scale: mouse.pressed ? 0.88 : (hover.hovered ? 1.10 : 1.0)
         opacity: root.active ? 1.0 : (hover.hovered ? 1.0 : 0.82)
 
@@ -182,7 +185,7 @@ Item {
             anchors.centerIn: parent
             visible: root.icon === "repeatOne"
             text: "1"
-            font.pixelSize: 9
+            font.pixelSize: (9) * Appearance.fontScale
             font.bold: true
             color: root.color
         }
@@ -241,6 +244,29 @@ Item {
             Rectangle { width: 2; height: 7; radius: 1; color: root.color }
         }
 
+        Shape {
+            anchors.fill: parent
+            visible: root.icon === "settings"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: 1.7
+                fillColor: "transparent"
+                PathAngleArc {
+                    centerX: 10; centerY: 10
+                    radiusX: 5.5; radiusY: 5.5
+                    startAngle: 0; sweepAngle: 360
+                }
+            }
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: 2.4
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                PathSvg { path: "M10,1.8 L10,4 M10,16 L10,18.2 M1.8,10 L4,10 M16,10 L18.2,10 M4.2,4.2 L5.7,5.7 M14.3,14.3 L15.8,15.8 M15.8,4.2 L14.3,5.7 M5.7,14.3 L4.2,15.8" }
+            }
+        }
+
         // 視窗控制
         Shape {
             anchors.fill: parent
@@ -278,6 +304,18 @@ Item {
                 fillColor: root.color
                 strokeWidth: -1
                 PathSvg { path: "M2,4 L18,4 L18,7 L2,7 Z M2,13 L18,13 L18,16 L2,16 Z" }
+            }
+        }
+        Shape {
+            anchors.fill: parent
+            visible: root.icon === "fullscreen"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: 1.7
+                fillColor: "transparent"
+                capStyle: ShapePath.SquareCap
+                PathSvg { path: "M3,8 L3,3 L8,3 M12,3 L17,3 L17,8 M17,12 L17,17 L12,17 M8,17 L3,17 L3,12" }
             }
         }
 

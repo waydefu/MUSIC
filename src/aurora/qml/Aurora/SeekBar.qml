@@ -125,7 +125,7 @@ Item {
             anchors.centerIn: parent
             text: root._clock(root._hoverFraction * root.duration)
             color: "white"
-            font.pixelSize: 11
+            font.pixelSize: (11) * Appearance.fontScale
             font.letterSpacing: 0.5
         }
     }

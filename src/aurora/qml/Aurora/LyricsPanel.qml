@@ -32,7 +32,7 @@ Item {
             anchors.margins: 18
             text: Strings.lyrics
             color: "white"
-            font.pixelSize: 13
+            font.pixelSize: (13) * Appearance.fontScale
             font.letterSpacing: 2.2
             font.weight: Font.DemiBold
         }
@@ -43,7 +43,7 @@ Item {
             anchors.rightMargin: 18
             text: root.controller && root.controller.hasWordTiming ? "同步" : "LRC"
             color: Qt.rgba(1, 1, 1, 0.42)
-            font.pixelSize: 10
+            font.pixelSize: (10) * Appearance.fontScale
             font.letterSpacing: 0.8
         }
 
@@ -57,14 +57,14 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: Strings.noLyrics
                 color: Qt.rgba(1, 1, 1, 0.60)
-                font.pixelSize: 16
+                font.pixelSize: (16) * Appearance.fontScale
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: parent.width
                 text: Strings.noLyricsHint
                 color: Qt.rgba(1, 1, 1, 0.34)
-                font.pixelSize: 11
+                font.pixelSize: (11) * Appearance.fontScale
                 wrapMode: Text.WordWrap
                 horizontalAlignment: Text.AlignHCenter
             }
@@ -114,7 +114,7 @@ Item {
                     text: lyricRow.text
                     wrapMode: Text.Wrap
                     color: lyricRow.active ? "white" : Qt.rgba(1, 1, 1, 0.48)
-                    font.pixelSize: lyricRow.active ? 18 : 15
+                    font.pixelSize: (lyricRow.active ? 18 : 15) * Appearance.fontScale
                     font.weight: lyricRow.active ? Font.DemiBold : Font.Normal
                     Behavior on color { ColorAnimation { duration: Motion.component } }
                     Behavior on font.pixelSize { NumberAnimation { duration: Motion.component } }
