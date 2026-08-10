@@ -31,9 +31,14 @@ Window {
     // 投影需要的外緣留白
     readonly property int shadowMargin: 22
 
-    Component.onCompleted: {
-        Motion.reduced = Qt.binding(() => motion.reduceMotion);
-        introAnimation.start();
+    // 進場動畫不能是內容可見性的唯一前提。若某張顯示卡的 effect 初始化
+    // 較慢或某個繫結失敗，視窗仍必須立即有可操作的內容。
+    Component.onCompleted: introAnimation.start()
+
+    Binding {
+        target: Motion
+        property: "reduced"
+        value: motion.reduceMotion
     }
 
     // ------------------------------------------------------------ 遮罩
@@ -54,10 +59,12 @@ Window {
         id: shell
         anchors.fill: parent
         anchors.margins: window.shadowMargin
-        opacity: 0
-        scale: 0.94
+        opacity: 1
+        scale: 1
 
-        layer.enabled: true
+        // 這層遮罩在部分 D3D11 驅動上會讓整個 Window 只剩黑色／透明，
+        // 因此不把裝飾性後製放在內容可見性的關鍵路徑上。
+        layer.enabled: false
         layer.effect: MultiEffect {
             maskEnabled: true
             maskSource: maskSource
