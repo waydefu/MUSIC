@@ -74,11 +74,15 @@ Item {
 
     Item {
         id: glyph
-        anchors.centerIn: parent
-        width: 20 * root.iconScale
-        height: 20 * root.iconScale
+        // Shape 的路徑使用固定的 20 × 20 座標系。若直接縮小 Item 尺寸，
+        // 路徑本身不會隨之縮放，圖示便會從中心向右下偏移。保持固定畫布，
+        // 再用 scale 從幾何中心縮放，所有尺寸的按鈕都會共用同一中心點。
+        x: Math.round((root.width - width) / 2)
+        y: Math.round((root.height - height) / 2)
+        width: 20
+        height: 20
         transformOrigin: Item.Center
-        scale: mouse.pressed ? 0.88 : (hover.hovered ? 1.10 : 1.0)
+        scale: root.iconScale * (mouse.pressed ? 0.88 : (hover.hovered ? 1.10 : 1.0))
         opacity: root.active ? 1.0 : (hover.hovered ? 1.0 : 0.82)
 
         Behavior on scale {
@@ -93,13 +97,14 @@ Item {
         // 比真正的路徑變形便宜得多，視覺效果幾乎一樣
         Shape {
             anchors.fill: parent
-            visible: root.icon === "play" || root.icon === "pause"
+            visible: root.icon === "play"
             preferredRendererType: Shape.CurveRenderer
 
             ShapePath {
                 fillColor: root.color
                 strokeWidth: -1
-                PathSvg { path: "M4,2 L17,10 L4,18 Z" }
+                // 面積重心落在 x=10，播放三角形才會視覺置中。
+                PathSvg { path: "M6,2 L18,10 L6,18 Z" }
             }
         }
         Row {

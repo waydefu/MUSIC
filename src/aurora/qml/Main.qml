@@ -457,6 +457,21 @@ Window {
             anchors.margins: 12
             visible: window.miniMode
 
+            // 整個迷你播放器的空白、封面與文字區都可拖動視窗。
+            // 這個 MouseArea 刻意放在最底層；後方宣告的操作按鈕會優先
+            // 接收點擊，因此拖曳不會吞掉播放或關閉事件。
+            MouseArea {
+                id: miniWindowDragSurface
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                cursorShape: Qt.SizeAllCursor
+                onPressed: (mouse) => {
+                    if (!window.startSystemMove()) {
+                        mouse.accepted = false;
+                    }
+                }
+            }
+
             Rectangle {
                 id: miniCover
                 anchors.left: parent.left
@@ -503,14 +518,6 @@ Window {
                 anchors.rightMargin: 8
                 height: 38
                 z: 1
-                TapHandler {
-                    gesturePolicy: TapHandler.DragThreshold
-                    onPressedChanged: {
-                        if (pressed) {
-                            window.startSystemMove();
-                        }
-                    }
-                }
             }
 
             Text {
@@ -543,17 +550,29 @@ Window {
                 Row {
                     anchors.centerIn: parent
                     spacing: 12
-                    IconButton {
-                        icon: "prev"; flat: true; width: 36; height: 36; iconScale: 0.72
-                        color: "white"; glow: window.accent; onClicked: player.playPrevious()
+                    Item {
+                        width: 36; height: 40
+                        IconButton {
+                            anchors.centerIn: parent
+                            icon: "prev"; flat: true; width: 36; height: 36; iconScale: 0.72
+                            color: "white"; glow: window.accent; onClicked: player.playPrevious()
+                        }
                     }
-                    IconButton {
-                        icon: player.playing ? "pause" : "play"; flat: false; width: 40; height: 40
-                        color: "white"; glow: window.accent; onClicked: player.togglePlay()
+                    Item {
+                        width: 40; height: 40
+                        IconButton {
+                            anchors.centerIn: parent
+                            icon: player.playing ? "pause" : "play"; flat: false; width: 40; height: 40
+                            color: "white"; glow: window.accent; onClicked: player.togglePlay()
+                        }
                     }
-                    IconButton {
-                        icon: "next"; flat: true; width: 36; height: 36; iconScale: 0.72
-                        color: "white"; glow: window.accent; onClicked: player.playNext()
+                    Item {
+                        width: 36; height: 40
+                        IconButton {
+                            anchors.centerIn: parent
+                            icon: "next"; flat: true; width: 36; height: 36; iconScale: 0.72
+                            color: "white"; glow: window.accent; onClicked: player.playNext()
+                        }
                     }
                 }
             }
