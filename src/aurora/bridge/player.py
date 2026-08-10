@@ -30,6 +30,12 @@ from aurora.core.constants import AUDIO_EXTENSIONS, SEEK_STEP_SEC, UI_TICK_HZ, V
 from aurora.core.models import Track
 from aurora.library.metadata import read_track
 from aurora.library.scanner import group_audio_files
+from aurora.platform_win.fileassoc import (
+    is_registered,
+    open_default_apps_settings,
+    register_file_types,
+    unregister_file_types,
+)
 
 _REPEAT_ORDER = ("off", "all", "one")
 _REPEAT_LABEL = {"off": "不循環", "all": "全部循環", "one": "單曲循環"}
@@ -49,6 +55,7 @@ class PlayerController(QObject):
     positionChanged = Signal()
     frameAdvanced = Signal()
     panelChanged = Signal()
+    fileTypesChanged = Signal()
     playingChanged = Signal()
     volumeChanged = Signal()
     shuffleChanged = Signal()
@@ -364,7 +371,13 @@ class PlayerController(QObject):
     def addPaths(self, paths: list[str]) -> None:
         self._add_paths(paths, autoplay_when_empty=True)
 
-    def _add_paths(self, paths: list[str], *, autoplay_when_empty: bool) -> None:
+    def _add_paths(
+        self,
+        paths: list[str],
+        *,
+        autoplay_when_empty: bool,
+        announce: bool = True,
+    ) -> None:
         tracks = [track for path in paths if (track := read_track(path)) is not None]
         if not tracks:
             return
@@ -372,7 +385,8 @@ class PlayerController(QObject):
         self._playlist.append(tracks)
         self._reshuffle()
         self.indexChanged.emit()
-        self.toast.emit(f"已加入 {len(tracks)} 首")
+        if announce:
+            self.toast.emit(f"已加入 {len(tracks)} 首")
         if was_empty and autoplay_when_empty:
             self.playIndex(0)
 
@@ -461,11 +475,57 @@ class PlayerController(QObject):
 
     # ------------------------------------------------------------ 生命週期
 
-    def start(self) -> None:
+    def start(self, opened_paths: list[str] | None = None) -> None:
+        """啟動。``opened_paths`` 是從檔案關聯或命令列帶進來的檔案。
+
+        有帶檔案時仍然先還原上次的清單，再把這些檔案接在後面並直接跳過去播 ——
+        使用者從檔案總管點開一首歌，期待的是「播這首」，不是「我的清單被清空」。
+        """
         self._quality.start()
         self._timer.start()
         self._refresh_library()
-        self._restore()
+        self._restore(resume=not opened_paths)
+        if opened_paths:
+            self.openPaths(opened_paths)
+
+    # ------------------------------------------------------------ 檔案關聯
+
+    @Property(bool, notify=fileTypesChanged)
+    def fileTypesRegistered(self) -> bool:
+        return is_registered()
+
+    @Slot()
+    def registerFileTypes(self) -> None:
+        """把 AURORA 加進音訊檔的「開啟方式」。不搶其他播放器的既有關聯。"""
+        if register_file_types():
+            self.toast.emit("已可用 AURORA 開啟 MP3、FLAC、WAV、OGG")
+        else:
+            self.toast.emit("註冊失敗，請確認沒有防護軟體阻擋")
+        self.fileTypesChanged.emit()
+
+    @Slot()
+    def unregisterFileTypes(self) -> None:
+        if unregister_file_types():
+            self.toast.emit("已移除檔案關聯")
+        self.fileTypesChanged.emit()
+
+    @Slot()
+    def openDefaultAppsSettings(self) -> None:
+        """開到 Windows 的預設應用程式頁面。
+
+        Windows 10 之後只有使用者本人能指定預設處理常式 —— 程式自己設會被
+        系統重設。所以這裡只負責把人帶到正確的地方。
+        """
+        if not open_default_apps_settings():
+            self.toast.emit("開不了 Windows 設定頁")
+
+    @Slot("QStringList")
+    def openPaths(self, paths: list[str]) -> None:
+        """把檔案加入清單並從第一首開始播。供檔案關聯使用。"""
+        first = self._playlist.rowCount()
+        self.addPaths(paths)
+        if self._playlist.rowCount() > first:
+            self.playIndex(first)
 
     def shutdown(self) -> None:
         self._timer.stop()
@@ -480,6 +540,8 @@ class PlayerController(QObject):
         if track is None:
             return
         self._index = row
+        # load() 內部會先 stop()，所以播放狀態一定變成停止。少了這個訊號，
+        # QML 會停在舊的「播放中」狀態，開啟時就看到一顆暫停鍵卻沒有聲音。
         self._engine.load(track.path, track.duration_sec)
         self._position = 0.0
         self._theme.apply_cover(track.cover_path, track.path)
@@ -488,6 +550,7 @@ class PlayerController(QObject):
         self.indexChanged.emit()
         self.trackChanged.emit()
         self.positionChanged.emit()
+        self.playingChanged.emit()
 
     def _advance(self, step: int, manual: bool = False) -> None:
         count = self._playlist.rowCount()
@@ -551,10 +614,17 @@ class PlayerController(QObject):
         if self._engine.take_finished():
             self._advance(1)
 
-    def _restore(self) -> None:
+    def _restore(self, resume: bool = True) -> None:
+        """還原上次的播放清單。``resume`` 為假時只載入清單，不跳回上次的位置 ——
+        使用者是為了播某個檔案才啟動的，不該被丟回上一首歌的中段。"""
         if not self._config.playlist:
             return
-        self.addPaths(self._config.playlist)
+        # 還原**不能**自動播放。開啟播放器就自己放起音樂是很擾人的行為，
+        # 而且原本的路徑會先 playIndex(0) 開始播、再被後面的 _load() 停掉，
+        # 留下一顆顯示「暫停」卻沒有聲音的按鈕。
+        self._add_paths(self._config.playlist, autoplay_when_empty=False, announce=False)
+        if not resume:
+            return
         target = self._config.current_index
         if 0 <= target < self._playlist.rowCount():
             self._load(target)

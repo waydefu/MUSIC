@@ -117,6 +117,25 @@ Window {
             anchors.fill: parent
             visible: !window.miniMode
 
+            // 標題列的拖曳面。
+            //
+            // 兩個細節決定了它能不能用：
+            //
+            // 1. **用 MouseArea 而不是 TapHandler。** Qt Quick 的 PointerHandler
+            //    即使被上層元件蓋住也照樣收得到事件；試過整個視窗鋪一層
+            //    TapHandler 拖曳面，結果播放清單、進度條、音量滑桿全被吃掉，
+            //    完全無法捲動或拖曳。MouseArea 會被上層接受事件的元件攔下。
+            // 2. **宣告在 TitleBar 之前**，所以標題列上的按鈕位於它之上，
+            //    點按鈕不會變成拖視窗。
+            //
+            // startSystemMove() 直接用 window 這個 id 呼叫。先前寫在 TitleBar.qml
+            // 裡透過 Window.window 附加屬性反向抓視窗，解析不到時只是靜靜失敗，
+            // 症狀就是「整個主視窗都拖不動」而且毫無錯誤訊息。
+            MouseArea {
+                anchors.fill: titleBar
+                onPressed: window.startSystemMove()
+            }
+
             TitleBar {
                 id: titleBar
                 anchors.top: parent.top
@@ -738,6 +757,8 @@ Window {
     property bool playlistFromLibrary: false
     property int normalWidth: 1180
     property int normalHeight: 760
+    //: 進迷你模式前開著的面板，回來時要還原。
+    property string panelBeforeMini: "playlist"
 
     function toggleFullscreen() {
         if (miniMode) { toggleMiniMode(); }
@@ -752,10 +773,16 @@ Window {
 
     function toggleMiniMode() {
         if (miniMode) {
-            miniMode = false; width = normalWidth; height = normalHeight;
+            miniMode = false;
+            width = normalWidth;
+            height = normalHeight;
+            // 迷你模式沒有側邊面板的空間，所以進去時收起了；回到一般模式
+            // 就該回到原本的樣子，而不是留給使用者一個空盪盪的右半邊。
+            openPanel = panelBeforeMini;
         } else {
             if (fullScreen) { toggleFullscreen(); }
             cinema = false;
+            panelBeforeMini = openPanel;
             openPanel = "";
             normalWidth = width; normalHeight = height;
             miniMode = true; width = 540; height = 180;

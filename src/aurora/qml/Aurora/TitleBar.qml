@@ -22,19 +22,10 @@ Item {
 
     implicitHeight: 46
 
-    Item {
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        anchors.left: parent.left
-        anchors.right: windowActions.left
-        anchors.rightMargin: 8
-        TapHandler {
-            gesturePolicy: TapHandler.DragThreshold
-            onPressedChanged: {
-                if (pressed) { Window.window.startSystemMove(); }
-            }
-        }
-    }
+    // 這裡刻意**沒有**拖曳處理。先前用 Window.window.startSystemMove() 從元件
+    // 內部反向抓視窗，解析不到時只會靜靜失敗，結果整個主視窗都拖不動。
+    // 拖曳改由 Main.qml 的全視窗拖曳面負責 —— 它在內容下方，按鈕與清單會
+    // 先吃掉事件，只有空白處才會落到它身上。
 
     Row {
         anchors.left: parent.left

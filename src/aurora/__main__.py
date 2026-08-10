@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from PySide6.QtCore import QPoint, QUrl
 from PySide6.QtGui import QGuiApplication, QIcon
@@ -14,7 +15,10 @@ from PySide6.QtQuickControls2 import QQuickStyle
 from aurora.bridge.motion import MotionController
 from aurora.bridge.player import PlayerController
 from aurora.core.config import Config, load_config
+from aurora.core.constants import AUDIO_EXTENSIONS
 from aurora.core.paths import data_file, qml_root
+from aurora.library.scanner import iter_audio_files
+from aurora.platform_win.fileassoc import register_file_types
 
 
 def _configure_engine(
@@ -89,6 +93,22 @@ def _save_window_geometry(config: Config, engine: QQmlApplicationEngine) -> None
     config.window.height = int(window.property("height"))
 
 
+def _openable_paths(candidates: Sequence[str]) -> list[str]:
+    """篩出真的能播的檔案，資料夾則展開。
+
+    檔案關聯把路徑當命令列參數丟進來，內容完全不可信 —— 可能是已被刪除的
+    捷徑目標、也可能是使用者手滑選到的文字檔。過濾掉之後至少不會開起來就當掉。
+    """
+    resolved: list[str] = []
+    for candidate in candidates:
+        path = Path(candidate)
+        if path.is_dir():
+            resolved.extend(str(found) for found in iter_audio_files([str(path)]))
+        elif path.is_file() and path.suffix.lower() in AUDIO_EXTENSIONS:
+            resolved.append(str(path))
+    return resolved
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="AURORA 極光播放器")
     parser.add_argument(
@@ -96,7 +116,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="只載入並驗證 QML，不開啟音訊裝置。",
     )
+    parser.add_argument(
+        "--register-file-types",
+        action="store_true",
+        help="把 AURORA 註冊為音訊檔的開啟方式，然後結束。",
+    )
+    parser.add_argument(
+        "files",
+        nargs="*",
+        help="要播放的音訊檔或資料夾。檔案關聯與「開啟方式」會用到。",
+    )
     options = parser.parse_args(argv)
+
+    if options.register_file_types:
+        return 0 if register_file_types() else 1
 
     # Qt Quick Controls 在 Windows 上預設走原生樣式，而原生樣式**不允許**
     # 覆寫 background / handle 之類的內部項目 —— 自訂寫了也會被靜靜忽略，
@@ -123,7 +156,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     _restore_window_geometry(config, engine)
-    player.start()
+    player.start(_openable_paths(options.files))
 
     def shutdown() -> None:
         _save_window_geometry(config, engine)

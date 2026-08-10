@@ -242,6 +242,95 @@ Item {
                     }
                 }
             }
+
+            // ---------------------------------------------------- 檔案關聯
+
+            Rectangle {
+                width: parent.width
+                height: 1
+                color: Qt.rgba(1, 1, 1, 0.10)
+            }
+
+            Text {
+                width: parent.width
+                text: "用 AURORA 開啟音樂檔"
+                color: "white"
+                font.pixelSize: 15 * Appearance.fontScale
+                font.weight: Font.DemiBold
+            }
+
+            Text {
+                width: parent.width
+                text: player.fileTypesRegistered
+                      ? "已註冊。在檔案上按右鍵 →「開啟方式」就能選 AURORA。"
+                      : "註冊後，MP3、FLAC、WAV、OGG 都能用 AURORA 開啟。"
+                        + "這只是加入選項，不會動到你現有的關聯。"
+                color: Qt.rgba(1, 1, 1, 0.46)
+                font.pixelSize: 11 * Appearance.fontScale
+                wrapMode: Text.WordWrap
+            }
+
+            Row {
+                width: parent.width
+                spacing: 8
+
+                Rectangle {
+                    width: (parent.width - parent.spacing) / 2
+                    height: 34
+                    radius: 8
+                    color: player.fileTypesRegistered
+                           ? Qt.rgba(1, 1, 1, registerHover.hovered ? 0.11 : 0.055)
+                           : Qt.rgba(root.accent.r, root.accent.g, root.accent.b,
+                                     registerHover.hovered ? 0.38 : 0.26)
+                    border.width: 1
+                    border.color: player.fileTypesRegistered
+                                  ? Qt.rgba(1, 1, 1, 0.12)
+                                  : root.accent
+                    Behavior on color { ColorAnimation { duration: Motion.hover } }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: player.fileTypesRegistered ? "移除關聯" : "註冊檔案關聯"
+                        color: "white"
+                        font.pixelSize: 12 * Appearance.fontScale
+                        font.weight: Font.DemiBold
+                    }
+                    HoverHandler { id: registerHover; cursorShape: Qt.PointingHandCursor }
+                    TapHandler {
+                        onTapped: player.fileTypesRegistered
+                                  ? player.unregisterFileTypes()
+                                  : player.registerFileTypes()
+                    }
+                }
+
+                Rectangle {
+                    width: (parent.width - parent.spacing) / 2
+                    height: 34
+                    radius: 8
+                    color: Qt.rgba(1, 1, 1, defaultHover.hovered ? 0.11 : 0.055)
+                    border.width: 1
+                    border.color: Qt.rgba(1, 1, 1, 0.12)
+                    Behavior on color { ColorAnimation { duration: Motion.hover } }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "設為預設…"
+                        color: Qt.rgba(1, 1, 1, 0.85)
+                        font.pixelSize: 12 * Appearance.fontScale
+                    }
+                    HoverHandler { id: defaultHover; cursorShape: Qt.PointingHandCursor }
+                    TapHandler { onTapped: player.openDefaultAppsSettings() }
+                }
+            }
+
+            Text {
+                width: parent.width
+                text: "「設為預設」會開啟 Windows 的預設應用程式設定。"
+                      + "Windows 10 之後只有你本人能指定預設播放器，程式自己設會被系統重設。"
+                color: Qt.rgba(1, 1, 1, 0.32)
+                font.pixelSize: 10 * Appearance.fontScale
+                wrapMode: Text.WordWrap
+            }
         }
     }
 }

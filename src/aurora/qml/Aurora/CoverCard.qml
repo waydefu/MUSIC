@@ -101,7 +101,14 @@ Item {
             width: Math.min(parent.width, parent.height)
             height: width
 
-            // 兩層封面交替，達成換歌時的交叉溶接
+            // 封面本體。圓角遮罩與陰影透過 layer.effect 掛在這個 Image 自己身上，
+            // **不是**另外放一個 MultiEffect 去參照隱藏的來源。
+            //
+            // 這個差別在調整視窗大小時很致命：外部 MultiEffect 持有的來源材質
+            // 不會跟著來源 Item 的新尺寸即時重繪，結果就是圖片仍以舊尺寸畫在
+            // 左上角，而外框光暈已經是新尺寸 —— 中間空一塊。
+            // layer.enabled 讓材質與 Item 幾何綁在一起，由場景圖統一管理，
+            // 尺寸永遠同步。
             Image {
                 id: picture
                 anchors.fill: parent
@@ -110,7 +117,24 @@ Item {
                 asynchronous: true
                 sourceSize.width: 720
                 sourceSize.height: 720
-                visible: false
+                visible: picture.status === Image.Ready
+
+                layer.enabled: picture.status === Image.Ready
+                layer.effect: MultiEffect {
+                    maskEnabled: true
+                    maskSource: mask
+                    shadowEnabled: true
+                    shadowColor: Qt.rgba(0, 0, 0, 0.55)
+                    shadowBlur: 0.9
+                    shadowVerticalOffset: 14
+                    shadowScale: 0.97
+                    saturation: root.playing ? 0.06 : -0.55
+                    brightness: root._punch * 0.10
+                    Behavior on saturation {
+                        NumberAnimation { duration: Motion.component }
+                    }
+                    Behavior on brightness { NumberAnimation { duration: Motion.short3 } }
+                }
             }
 
             // 沒有封面時的替代圖形：主色漸層 + 音符輪廓
@@ -135,27 +159,6 @@ Item {
                     font.pixelSize: (parent.width * 0.34) * Appearance.fontScale
                     color: Qt.rgba(1, 1, 1, 0.32)
                 }
-            }
-
-            // 圓角遮罩 + 陰影。maskEnabled 與 shadowEnabled 都會觸發著色器
-            // 重編，所以只在建立時設定，之後絕不動畫。
-            MultiEffect {
-                anchors.fill: parent
-                source: picture
-                visible: picture.status === Image.Ready
-                maskEnabled: true
-                maskSource: mask
-                shadowEnabled: true
-                shadowColor: Qt.rgba(0, 0, 0, 0.55)
-                shadowBlur: 0.9
-                shadowVerticalOffset: 14
-                shadowScale: 0.97
-                saturation: root.playing ? 0.06 : -0.55
-                brightness: root._punch * 0.10
-                Behavior on saturation {
-                    NumberAnimation { duration: Motion.component }
-                }
-                Behavior on brightness { NumberAnimation { duration: Motion.short3 } }
             }
 
             Item {
