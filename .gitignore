@@ -12,9 +12,6 @@ build/
 dist/
 *.spec.bak
 
-# 編譯後的 shader（由 tools/build_shaders.py 產生）
-*.qsb
-
 # 測試素材與截圖（由 tools/ 產生，不進版控）
 tests/_generated/
 screenshots/

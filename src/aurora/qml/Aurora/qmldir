@@ -1,0 +1,21 @@
+module Aurora
+
+singleton Motion 1.0 Motion.qml
+singleton Strings 1.0 Strings.qml
+
+Backdrop 1.0 Backdrop.qml
+CoverCard 1.0 CoverCard.qml
+GlassPanel 1.0 GlassPanel.qml
+IconButton 1.0 IconButton.qml
+LyricsPanel 1.0 LyricsPanel.qml
+MarqueeText 1.0 MarqueeText.qml
+ParticleField 1.0 ParticleField.qml
+PlaylistPanel 1.0 PlaylistPanel.qml
+PostStack 1.0 PostStack.qml
+QualityPanel 1.0 QualityPanel.qml
+SeekBar 1.0 SeekBar.qml
+SpectrumBars 1.0 SpectrumBars.qml
+TitleBar 1.0 TitleBar.qml
+Toast 1.0 Toast.qml
+TransportControls 1.0 TransportControls.qml
+VolumeControl 1.0 VolumeControl.qml

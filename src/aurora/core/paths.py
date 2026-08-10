@@ -34,7 +34,13 @@ def resource_root() -> Path:
 
 def data_file(name: str) -> Path:
     """``data/`` 底下的一個資料檔。"""
-    return resource_root() / "data" / name
+    if is_frozen():
+        return resource_root() / "data" / name
+
+    project_data = Path(__file__).resolve().parents[3] / "data" / name
+    if project_data.is_file():
+        return project_data
+    return Path(__file__).resolve().parents[2] / "data" / name
 
 
 def qml_root() -> Path:

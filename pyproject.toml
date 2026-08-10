@@ -15,6 +15,7 @@ aurora = "aurora.__main__:main"
 
 [dependency-groups]
 dev = [
+    "editables>=0.5",
     "pytest>=8.0",
     "ruff>=0.6",
     "mypy>=1.11",
@@ -22,11 +23,18 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "editables>=0.5"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aurora"]
+# The normal editable .pth stores a raw Windows path. Python 3.11 decodes
+# .pth files with the active ANSI code page, which breaks this project's
+# non-ASCII path. Exact mode installs Hatchling's import hook instead.
+dev-mode-exact = true
+
+[tool.hatch.build.targets.wheel.force-include]
+"data" = "data"
 
 # ---------------------------------------------------------------- ruff
 
