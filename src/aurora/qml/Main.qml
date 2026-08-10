@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Effects
+import QtQuick.Dialogs
 import Aurora
 
 /*!
@@ -264,7 +265,7 @@ Window {
                     accent2: window.accent2
                     bloomEnabled: motion.bloomEnabled
                     bloomStrength: motion.bloomStrength
-                    opacity: window.lyricsOpen || window.playlistOpen ? 0.25 : 1.0
+                    opacity: window.lyricsOpen || window.playlistOpen || window.libraryOpen ? 0.25 : 1.0
                     Behavior on opacity { NumberAnimation { duration: Motion.panel } }
                 }
 
@@ -283,6 +284,15 @@ Window {
                     open: window.playlistOpen
                     onActivated: (row) => player.playIndex(row)
                     onRemoved: (row) => player.removeAt(row)
+                }
+
+                LibraryPanel {
+                    anchors.fill: parent
+                    controller: player
+                    accent: window.accent
+                    open: window.libraryOpen
+                    onPickFolderRequested: libraryFolderDialog.open()
+                    onActivated: (folder) => player.playLibraryPlaylist(folder)
                 }
 
                 QualityPanel {
@@ -366,6 +376,12 @@ Window {
                     anchors.bottomMargin: 14
                     spacing: 2
 
+                    IconButton {
+                        icon: "folder"; flat: true; width: 38; height: 38; iconScale: 0.8
+                        color: "white"; glow: window.accent
+                        active: window.libraryOpen
+                        onClicked: window.togglePanel("library")
+                    }
                     IconButton {
                         icon: "list"; flat: true; width: 38; height: 38; iconScale: 0.8
                         color: "white"; glow: window.accent
@@ -471,17 +487,27 @@ Window {
     // ------------------------------------------------------------ 狀態
 
     property bool playlistOpen: false
+    property bool libraryOpen: false
     property bool lyricsOpen: false
     property bool qualityOpen: false
     property bool cinema: false
 
     function togglePanel(name) {
         const wasOpen = (name === "playlist" && playlistOpen)
+                     || (name === "library" && libraryOpen)
                      || (name === "lyrics" && lyricsOpen)
                      || (name === "quality" && qualityOpen);
         playlistOpen = !wasOpen && name === "playlist";
+        libraryOpen = !wasOpen && name === "library";
         lyricsOpen = !wasOpen && name === "lyrics";
         qualityOpen = !wasOpen && name === "quality";
+    }
+
+    FileDialog {
+        id: libraryFolderDialog
+        title: "選擇音樂資料夾"
+        fileMode: FileDialog.OpenDirectory
+        onAccepted: player.addLibraryFolder(selectedFile)
     }
 
     // 音樂能量的單一來源。所有視覺元件都綁這裡，共用同一個節拍。
@@ -549,6 +575,8 @@ Window {
     Shortcut { sequence: "Down"; onActivated: player.bumpVolume(-0.05) }
     Shortcut { sequence: "M"; onActivated: player.toggleMute() }
     Shortcut { sequence: "L"; onActivated: window.togglePanel("lyrics") }
+    Shortcut { sequence: "Ctrl+L"; onActivated: window.togglePanel("library") }
+    Shortcut { sequence: "Ctrl+O"; onActivated: libraryFolderDialog.open() }
     Shortcut { sequence: "P"; onActivated: window.togglePanel("playlist") }
     Shortcut { sequence: "I"; onActivated: window.togglePanel("quality") }
     Shortcut { sequence: "C"; onActivated: window.cinema = !window.cinema }
@@ -558,7 +586,10 @@ Window {
             if (window.cinema) {
                 window.cinema = false;
             } else {
-                window.playlistOpen = window.lyricsOpen = window.qualityOpen = false;
+                window.playlistOpen = false;
+                window.libraryOpen = false;
+                window.lyricsOpen = false;
+                window.qualityOpen = false;
             }
         }
     }

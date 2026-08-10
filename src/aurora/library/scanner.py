@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+from collections import defaultdict
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -52,6 +53,18 @@ def iter_audio_files(roots: list[str] | tuple[str, ...]) -> Iterator[Path]:
                     yield Path(entry.path)
             except OSError:
                 continue
+
+
+def group_audio_files(roots: list[str] | tuple[str, ...]) -> dict[Path, tuple[Path, ...]]:
+    """Group audio files by their containing folder for folder-based playlists."""
+    grouped: defaultdict[Path, list[Path]] = defaultdict(list)
+    for path in iter_audio_files(roots):
+        grouped[path.parent].append(path)
+
+    return {
+        folder: tuple(sorted(paths, key=lambda path: path.name.casefold()))
+        for folder, paths in sorted(grouped.items(), key=lambda item: str(item[0]).casefold())
+    }
 
 
 def scan(

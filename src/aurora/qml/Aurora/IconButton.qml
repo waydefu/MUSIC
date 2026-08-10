@@ -12,7 +12,7 @@ Item {
     id: root
 
     /*! 圖示種類：play / pause / prev / next / shuffle / repeat / repeatOne /
-        volume / mute / list / lyrics / info / close / minimise / mini / cinema */
+        volume / mute / folder / list / lyrics / info / close / minimise / mini / cinema */
     property string icon: "play"
     property color color: "#FFFFFF"
     property color glow: "#FFFFFF"
@@ -185,6 +185,20 @@ Item {
             font.pixelSize: 9
             font.bold: true
             color: root.color
+        }
+
+        // 資料夾
+        Shape {
+            anchors.fill: parent
+            visible: root.icon === "folder"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: 1.6
+                fillColor: "transparent"
+                joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M2,6 L8,6 L10,8 L18,8 L18,16 L2,16 Z" }
+            }
         }
 
         // 清單 / 歌詞 / 資訊：用三條長度不同的橫線表達

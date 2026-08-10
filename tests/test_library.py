@@ -9,7 +9,7 @@ import pytest
 
 from aurora.core.lrc import parse_lrc
 from aurora.library.metadata import read_lyrics_text, read_track
-from aurora.library.scanner import iter_audio_files, scan
+from aurora.library.scanner import group_audio_files, iter_audio_files, scan
 from aurora.library.store import LibraryCache
 
 # ------------------------------------------------------------------ 標籤
@@ -121,6 +121,21 @@ def test_scanner_recurses_into_subdirectories(tmp_path: Path, generated_dir: Pat
     deep.mkdir(parents=True)
     shutil.copy2(generated_dir / "test.flac", deep / "歌.flac")
     assert [path.name for path in iter_audio_files([str(tmp_path)])] == ["歌.flac"]
+
+
+def test_subfolders_become_independent_playlists(tmp_path: Path, generated_dir: Path) -> None:
+    first = tmp_path / "專輯 A"
+    second = tmp_path / "專輯 B"
+    first.mkdir()
+    second.mkdir()
+    shutil.copy2(generated_dir / "test.flac", first / "第一首.flac")
+    shutil.copy2(generated_dir / "test_320k.mp3", second / "第二首.mp3")
+
+    groups = group_audio_files([str(tmp_path)])
+
+    assert {folder.name for folder in groups} == {"專輯 A", "專輯 B"}
+    assert [path.name for path in groups[first]] == ["第一首.flac"]
+    assert [path.name for path in groups[second]] == ["第二首.mp3"]
 
 
 def test_scanner_skips_unreadable_roots(tmp_path: Path) -> None:

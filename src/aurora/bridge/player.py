@@ -29,7 +29,7 @@ from aurora.core.config import Config, save_config
 from aurora.core.constants import AUDIO_EXTENSIONS, SEEK_STEP_SEC, UI_TICK_HZ, VOLUME_STEP
 from aurora.core.models import Track
 from aurora.library.metadata import read_track
-from aurora.library.scanner import iter_audio_files
+from aurora.library.scanner import group_audio_files, iter_audio_files
 
 _REPEAT_ORDER = ("off", "all", "one")
 _REPEAT_LABEL = {"off": "不循環", "all": "全部循環", "one": "單曲循環"}
@@ -53,6 +53,7 @@ class PlayerController(QObject):
     shuffleChanged = Signal()
     repeatChanged = Signal()
     indexChanged = Signal()
+    libraryChanged = Signal()
     toast = Signal(str)
     beat = Signal()
 
@@ -71,6 +72,7 @@ class PlayerController(QObject):
         self._energy = 0.0
         self._bass = 0.0
         self._shuffle_order: list[int] = []
+        self._library_playlists: dict[str, tuple[str, ...]] = {}
         self._engine.volume = config.volume
         self._engine.muted = config.muted
 
@@ -102,6 +104,13 @@ class PlayerController(QObject):
     @Property(QObject, constant=True)
     def quality(self) -> QualityController:
         return self._quality
+
+    @Property(list, notify=libraryChanged)
+    def libraryPlaylists(self) -> list[dict[str, object]]:
+        return [
+            {"path": folder, "label": Path(folder).name or folder, "count": len(paths)}
+            for folder, paths in self._library_playlists.items()
+        ]
 
     # ------------------------------------------------------------ 曲目資訊
 
@@ -322,6 +331,29 @@ class PlayerController(QObject):
         if was_empty:
             self.playIndex(0)
 
+    @Slot(QUrl)
+    def addLibraryFolder(self, folder: QUrl) -> None:
+        path = Path(folder.toLocalFile())
+        if not path.is_dir():
+            return
+        resolved = str(path.resolve())
+        if any(item.casefold() == resolved.casefold() for item in self._config.library_folders):
+            self.toast.emit("This music folder is already added.")
+            return
+        self._config.library_folders.append(resolved)
+        self._refresh_library()
+        save_config(self._config)
+        self.toast.emit("Music folder added.")
+
+    @Slot(str)
+    def playLibraryPlaylist(self, folder: str) -> None:
+        paths = self._library_playlists.get(folder, ())
+        if not paths:
+            self.toast.emit("This folder has no playable music.")
+            return
+        self.clearPlaylist()
+        self.addPaths(list(paths))
+
     @Slot()
     def clearPlaylist(self) -> None:
         self._engine.stop()
@@ -350,6 +382,7 @@ class PlayerController(QObject):
     def start(self) -> None:
         self._quality.start()
         self._timer.start()
+        self._refresh_library()
         self._restore()
 
     def shutdown(self) -> None:
@@ -404,6 +437,13 @@ class PlayerController(QObject):
         order = list(range(self._playlist.rowCount()))
         random.shuffle(order)
         self._shuffle_order = order
+
+    def _refresh_library(self) -> None:
+        groups = group_audio_files(self._config.library_folders)
+        self._library_playlists = {
+            str(folder): tuple(str(path) for path in paths) for folder, paths in groups.items()
+        }
+        self.libraryChanged.emit()
 
     def _on_output_rate(self, rate: int) -> None:
         """輸出端點換取樣率時讓引擎跟上，少一次重取樣。"""
