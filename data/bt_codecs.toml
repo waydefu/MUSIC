@@ -1,0 +1,171 @@
+# 藍牙編碼推定對照表
+#
+# 為什麼需要「推定」：
+#   Windows 沒有任何公開途徑可以讀出 A2DP 實際協商的編碼。
+#   已於 Windows 11 23H2 (build 22631) 實測確認：
+#     * HKLM\SYSTEM\CurrentControlSet\Enum\BTHENUM\{0000110b-...}\*\Device Parameters
+#       只有 Bluetooth_UniqueID 與 ConnectionCount
+#     * HKLM\SYSTEM\CurrentControlSet\Services\BTHA2DP\Parameters 不存在
+#     * 四個 Bluetooth 事件記錄檔（Policy / Bthmini / MTPEnum / BthLEPrepairing）
+#       不是停用就是零筆，且都不含編碼欄位
+#
+# 因此 A2DP 編碼一律標示為「推定」，推定方式：
+#     裝置支援的編碼  ∩  本機 Windows + 藍牙晶片實際支援的編碼  →  取優先序最高者
+#
+# 相對地，HFP 的編碼是「推導」而非推定 —— 端點格式與編碼是一對一關係。
+#
+# 維護方式：新增機型或廠商只要改這個檔案，不必動任何程式碼。
+
+[meta]
+version = 1
+# 協商時通常由高到低勝出
+priority = ["aptX Adaptive", "aptX HD", "LDAC", "aptX", "AAC", "SBC"]
+
+# ---------------------------------------------------------------------------
+# Windows 原生支援的 A2DP 編碼
+#
+# 依據 Microsoft Learn《Bluetooth accessory guidelines — Bluetooth Classic audio》：
+#   「Windows supports the mandatory low-complexity Sub-band codec (SBC) along with
+#     the low-complexity Advanced Audio Codec (AAC LC) and Qualcomm aptX codecs.」
+#
+# LDAC、aptX HD、aptX Adaptive 均非 Windows 原生支援，需第三方 A2DP 驅動。
+# 這就是為什麼一支支援 LDAC 的耳機接上 Windows 後多半只跑 AAC 或 SBC。
+# ---------------------------------------------------------------------------
+
+[windows]
+# SBC 是 A2DP 強制編碼，任何版本都有
+base = ["SBC"]
+
+[[windows.tier]]
+min_build = 22000
+codecs = ["AAC"]
+label = "Windows 11 支援 AAC LC"
+
+# aptX 需要 Qualcomm 藍牙晶片搭配廠商驅動，不是所有機器都有
+[windows.radio_dependent]
+aptX = "qualcomm"
+
+# ---------------------------------------------------------------------------
+# 本機藍牙晶片（依 USB Vendor ID 比對）
+# 取自 HKLM\SYSTEM\CurrentControlSet\Services\BTHUSB\Enum
+# ---------------------------------------------------------------------------
+
+[[radio]]
+usb_vid = 0x8087
+name = "Intel"
+family = "intel"
+
+[[radio]]
+usb_vid = 0x0CF3
+name = "Qualcomm Atheros"
+family = "qualcomm"
+
+[[radio]]
+usb_vid = 0x0A12
+name = "Cambridge Silicon Radio (Qualcomm)"
+family = "qualcomm"
+
+[[radio]]
+usb_vid = 0x0BDA
+name = "Realtek"
+family = "realtek"
+
+[[radio]]
+usb_vid = 0x0A5C
+name = "Broadcom"
+family = "broadcom"
+
+[[radio]]
+usb_vid = 0x13D3
+name = "IMC Networks"
+family = "unknown"
+
+[[radio]]
+usb_vid = 0x0489
+name = "Foxconn"
+family = "unknown"
+
+# ---------------------------------------------------------------------------
+# 耳機／喇叭端支援的編碼，依藍牙 SIG 公司代碼比對
+# 公司代碼來自裝置 InstanceId 的 VID&<namespace><companyId>，
+# 例：BTHENUM\{0000110b-...}_VID&0001004C_PID&200E → 0x004C = Apple
+# ---------------------------------------------------------------------------
+
+[[vendor]]
+company_id = 0x004C
+name = "Apple"
+codecs = ["AAC", "SBC"]
+
+[[vendor]]
+company_id = 0x0094
+name = "Panasonic / Technics"
+codecs = ["LDAC", "AAC", "SBC"]
+
+[[vendor]]
+company_id = 0x012D
+name = "Sony"
+codecs = ["LDAC", "AAC", "SBC"]
+
+[[vendor]]
+company_id = 0x0075
+name = "Samsung"
+codecs = ["AAC", "SBC"]
+
+[[vendor]]
+company_id = 0x001D
+name = "Qualcomm"
+codecs = ["aptX Adaptive", "aptX HD", "aptX", "AAC", "SBC"]
+
+[[vendor]]
+company_id = 0x000F
+name = "Broadcom"
+codecs = ["AAC", "SBC"]
+
+[[vendor]]
+company_id = 0x00E0
+name = "Google"
+codecs = ["AAC", "SBC"]
+
+# ---------------------------------------------------------------------------
+# 特定機型（比對裝置名稱關鍵字，不分大小寫）。優先於 vendor。
+# ---------------------------------------------------------------------------
+
+[[model]]
+match = "EAH-AZ100"
+name = "Technics EAH-AZ100"
+codecs = ["LDAC", "AAC", "SBC"]
+
+[[model]]
+match = "AirPods"
+name = "Apple AirPods"
+codecs = ["AAC", "SBC"]
+
+[[model]]
+match = "WH-1000XM"
+name = "Sony WH-1000XM 系列"
+codecs = ["LDAC", "AAC", "SBC"]
+
+[[model]]
+match = "WF-1000XM"
+name = "Sony WF-1000XM 系列"
+codecs = ["LDAC", "AAC", "SBC"]
+
+# ---------------------------------------------------------------------------
+# HFP（通話模式）的編碼由端點格式唯一推導，不需要推定。
+# 依 HFP 1.8 §5.7.4 與 HFP 1.9 超寬頻。
+# ---------------------------------------------------------------------------
+
+[[hfp]]
+sample_rate = 8000
+codec = "CVSD"
+label = "窄頻語音"
+
+[[hfp]]
+sample_rate = 16000
+codec = "mSBC"
+label = "寬頻語音"
+
+[[hfp]]
+sample_rate = 32000
+codec = "LC3-SWB"
+label = "超寬頻語音"

@@ -1,0 +1,82 @@
+[project]
+name = "aurora-player"
+version = "0.1.0"
+description = "AURORA 極光播放器 — 封面沉浸式桌面音樂播放器"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "PySide6==6.11.1",
+    "miniaudio==1.71",
+    "mutagen==1.48.1",
+    "numpy>=2.0,<3",
+]
+
+[project.scripts]
+aurora = "aurora.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pyinstaller==6.22.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aurora"]
+
+# ---------------------------------------------------------------- ruff
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "tools"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "SIM",  # simplify
+    "RUF",
+]
+ignore = [
+    "RUF001",  # 全形標點在中文註解裡是正常的
+    "RUF002",
+    "RUF003",
+    "N802",    # Qt 慣例用 camelCase slot/property 名
+    "N815",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+# ---------------------------------------------------------------- mypy
+# 只對 core/ 開 strict：core 是純邏輯層，不受 Qt 動態性汙染。
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/aurora"]
+ignore_missing_imports = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = "aurora.core.*"
+strict = true
+
+# ---------------------------------------------------------------- pytest
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q --strict-markers"
+markers = [
+    "win: 需要 Windows 音訊子系統的測試",
+    "audio: 會實際開啟音訊裝置的測試",
+]
