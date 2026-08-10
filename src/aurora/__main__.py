@@ -6,7 +6,7 @@ import argparse
 import sys
 from collections.abc import Sequence
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QPoint, QUrl
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -29,32 +29,51 @@ def _configure_engine(
     engine.load(QUrl.fromLocalFile(str(qml_root() / "Main.qml")))
 
 
+#: 與 Main.qml 的 minimumWidth / minimumHeight 保持一致。
+_MIN_WIDTH = 880
+_MIN_HEIGHT = 560
+
+
 def _restore_window_geometry(config: Config, engine: QQmlApplicationEngine) -> None:
-    """把上次的視窗大小與位置套回去。
+    """把上次的視窗大小與位置套回去，並夾限在螢幕可用範圍內。
 
-    先前只有存、沒有讀，所以每次開啟都回到 Main.qml 寫死的 1180x760，
-    使用者調過的大小完全留不住。
+    兩件事以前都沒做：
 
-    位置要驗證還在某個螢幕上：外接螢幕拔掉後，舊座標會讓視窗開在
-    看不見的地方，使用者只會覺得「程式打不開」。
+    **沒有還原。** 只在關閉時存、從不讀，每次開啟都回到 Main.qml 寫死的
+    1180x760，使用者調過的大小完全留不住。
+
+    **沒有夾限。** 這才是「視窗放大就被截掉」的真正原因。Qt 是 DPI 感知的，
+    QML 的尺寸單位是**邏輯**像素；在 125% 縮放的 1920x1080 螢幕上，
+    邏輯桌面其實只有 1536x864。視窗一旦高過 864，底部的播放控制列就整個
+    掉到螢幕外，而且因為視窗無邊框，使用者連拖回來都很難。
+    實測就是這個情況：1442x887 的視窗，底部 23 px 永遠看不到。
+
+    夾限之後，視窗永遠至少完整落在某一個螢幕的工作區內。
     """
     if not engine.rootObjects():
         return
     window = engine.rootObjects()[0]
     geometry = config.window
 
-    window.setProperty("width", geometry.width)
-    window.setProperty("height", geometry.height)
+    screen = None
+    if geometry.is_placed:
+        screen = QGuiApplication.screenAt(QPoint(geometry.x + 60, geometry.y + 20))
+    screen = screen or QGuiApplication.primaryScreen()
+    if screen is None:
+        return
+    available = screen.availableGeometry()
+
+    width = max(_MIN_WIDTH, min(geometry.width, available.width()))
+    height = max(_MIN_HEIGHT, min(geometry.height, available.height()))
+    window.setProperty("width", width)
+    window.setProperty("height", height)
 
     if not geometry.is_placed:
         return
-    for screen in QGuiApplication.screens():
-        available = screen.availableGeometry()
-        # 只要標題列還看得到就算有效，不必整個視窗都在螢幕內
-        if available.contains(geometry.x + 60, geometry.y + 20):
-            window.setProperty("x", geometry.x)
-            window.setProperty("y", geometry.y)
-            return
+    x = min(max(geometry.x, available.left()), available.right() - width + 1)
+    y = min(max(geometry.y, available.top()), available.bottom() - height + 1)
+    window.setProperty("x", x)
+    window.setProperty("y", y)
 
 
 def _save_window_geometry(config: Config, engine: QQmlApplicationEngine) -> None:

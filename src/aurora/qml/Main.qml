@@ -20,6 +20,13 @@ Window {
     height: 760
     minimumWidth: miniMode ? 360 : 880
     minimumHeight: miniMode ? 150 : 560
+
+    // 視窗絕不能大過桌面可用範圍。這是無邊框視窗特有的陷阱：
+    // 一旦底部的播放控制列掉到螢幕外，使用者連把視窗拖回來都很困難。
+    // 在 125% 縮放的 1920x1080 螢幕上，邏輯桌面只有 1536x864，
+    // 而 QML 的尺寸單位正是邏輯像素 —— 很容易不知不覺就超出。
+    maximumWidth: fullScreen ? Screen.width : Screen.desktopAvailableWidth
+    maximumHeight: fullScreen ? Screen.height : Screen.desktopAvailableHeight
     visible: true
     color: introDone ? "transparent" : "#06110C"
     flags: Qt.Window | Qt.FramelessWindowHint
