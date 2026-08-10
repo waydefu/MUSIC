@@ -5,13 +5,13 @@
 所以要另外從 ``HKLM\\SYSTEM\\CurrentControlSet\\Enum\\BTHENUM`` 湊出對應：
 
 ``Dev_<MAC>``
-    存放裝置的 FriendlyName，例如 ``Dev_589EEF0B9547`` → ``AirPods Pro #3``。
+    存放裝置的 FriendlyName，例如 ``Dev_AA11BB22CC33`` → ``AirPods Pro``。
 ``{0000110b-…}_VID&<ns><company>_PID&<pid>``
     A2DP Sink 服務鍵，鍵名帶廠商代碼，底下的執行個體名帶 MAC，
-    例如 ``7&1d797e06&2&589EEF0B9547_C00000000``。
+    例如 ``7&1a2b3c4d&2&AA11BB22CC33_C00000000``。
 
 兩邊用 MAC 接起來，就得到「裝置名稱 → 藍牙 SIG 公司代碼」。
-端點名稱可能帶後綴（``AirPods Pro #3 Hands-Free``），所以比對用前綴。
+端點名稱可能帶後綴（``AirPods Pro Hands-Free``），所以比對用前綴。
 
 全部唯讀，且任何一步失敗都只是少一項資訊，不影響播放。
 """
@@ -134,7 +134,7 @@ def scan_bluetooth_devices() -> tuple[BluetoothDevice, ...]:
 def match_company_id(endpoint_name: str, devices: tuple[BluetoothDevice, ...]) -> int | None:
     """把音訊端點名稱對回藍牙裝置的公司代碼。
 
-    端點名稱可能是 ``AirPods Pro #3`` 或 ``AirPods Pro #3 Hands-Free``，
+    端點名稱可能是 ``AirPods Pro`` 或 ``AirPods Pro Hands-Free``，
     所以取「名稱最長且為端點名稱前綴」的那台 —— 避免短名稱誤命中。
     """
     lowered = endpoint_name.strip().lower()

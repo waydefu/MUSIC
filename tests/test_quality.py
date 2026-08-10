@@ -46,7 +46,7 @@ def _endpoint(
 ) -> EndpointInfo:
     return EndpointInfo(
         id="{test}",
-        friendly_name="AirPods Pro #3",
+        friendly_name="AirPods Pro",
         description="Headphones",
         enumerator="BTHENUM",
         instance_id="BTHENUM\\test",

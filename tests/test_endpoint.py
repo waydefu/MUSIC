@@ -113,9 +113,9 @@ def test_rejects_absurd_sample_rate() -> None:
 
 
 def test_enumerator_determines_transport() -> None:
-    assert classify_transport("BTHENUM", "AirPods Pro #3") is TransportKind.BLUETOOTH_A2DP
+    assert classify_transport("BTHENUM", "AirPods Pro") is TransportKind.BLUETOOTH_A2DP
     assert (
-        classify_transport("BTHHFENUM", "AirPods Pro #3 Hands-Free") is TransportKind.BLUETOOTH_HFP
+        classify_transport("BTHHFENUM", "AirPods Pro Hands-Free") is TransportKind.BLUETOOTH_HFP
     )
     assert classify_transport("INTELAUDIO", "喇叭") is TransportKind.WIRED
     assert classify_transport("USB", "Dell WH3024 Headset") is TransportKind.WIRED
@@ -130,7 +130,7 @@ def test_unified_endpoint_falls_back_to_name() -> None:
         is TransportKind.BLUETOOTH_HFP
     )
     assert (
-        classify_transport("BTHENUM", "AirPods Pro #3 Hands-Free AG Audio")
+        classify_transport("BTHENUM", "AirPods Pro Hands-Free AG Audio")
         is TransportKind.BLUETOOTH_HFP
     )
 
@@ -141,10 +141,10 @@ def test_unified_endpoint_falls_back_to_name() -> None:
 def _devices() -> tuple[BluetoothDevice, ...]:
     """本機註冊表實際掃到的內容。"""
     return (
-        BluetoothDevice("148509C071E9", "AirPods Pro (RF)", 0x004C),
-        BluetoothDevice("589EEF0B9547", "AirPods Pro #3", 0x004C),
-        BluetoothDevice("B8208EF2023B", "Technics EAH-AZ100", 0x0094),
-        BluetoothDevice("D88C794B6E70", "客廳", 0x000F),
+        BluetoothDevice("778899AABBCC", "AirPods Pro 2", 0x004C),
+        BluetoothDevice("AA11BB22CC33", "AirPods Pro", 0x004C),
+        BluetoothDevice("DD44EE55FF66", "Technics EAH-AZ100", 0x0094),
+        BluetoothDevice("112233445566", "藍牙喇叭", 0x000F),
     )
 
 
@@ -153,7 +153,7 @@ def test_matches_exact_endpoint_name() -> None:
 
 
 def test_matches_endpoint_name_with_hands_free_suffix() -> None:
-    assert match_company_id("AirPods Pro #3 Hands-Free", _devices()) == 0x004C
+    assert match_company_id("AirPods Pro Hands-Free", _devices()) == 0x004C
 
 
 def test_unrelated_endpoint_matches_nothing() -> None:
@@ -190,13 +190,13 @@ def _endpoint(name: str, enumerator: str, blob: bytes, company: int | None):  # 
 
 def test_real_airpods_a2dp_resolves_to_aac_on_this_machine() -> None:
     """本機是 Intel 晶片 + Windows 11 → AirPods 應推定為 AAC。"""
-    endpoint = _endpoint("AirPods Pro #3", "BTHENUM", AIRPODS_A2DP, 0x004C)
+    endpoint = _endpoint("AirPods Pro", "BTHENUM", AIRPODS_A2DP, 0x004C)
     codec = resolve_codec(endpoint, HostContext(22631, RadioInfo(0x8087, "Intel", "intel")))
     assert codec.name == "AAC"
 
 
 def test_real_hfp_endpoint_resolves_to_cvsd() -> None:
-    endpoint = _endpoint("AirPods Pro #3 Hands-Free", "BTHHFENUM", AIRPODS_HFP_NARROW, 0x004C)
+    endpoint = _endpoint("AirPods Pro Hands-Free", "BTHHFENUM", AIRPODS_HFP_NARROW, 0x004C)
     codec = resolve_codec(endpoint, HostContext(22631, RadioInfo(0x8087, "Intel", "intel")))
     assert codec.name == "CVSD"
 
@@ -213,13 +213,13 @@ def test_technics_ldac_is_unavailable_on_intel_windows() -> None:
 
 
 def test_snapshot_detects_hfp_sibling() -> None:
-    a2dp = _endpoint("AirPods Pro #3", "BTHENUM", AIRPODS_A2DP, 0x004C)
-    hfp = _endpoint("AirPods Pro #3 Hands-Free", "BTHHFENUM", AIRPODS_HFP_NARROW, 0x004C)
+    a2dp = _endpoint("AirPods Pro", "BTHENUM", AIRPODS_A2DP, 0x004C)
+    hfp = _endpoint("AirPods Pro Hands-Free", "BTHHFENUM", AIRPODS_HFP_NARROW, 0x004C)
     assert EndpointSnapshot(default=a2dp, active=(a2dp, hfp)).hfp_also_connected
 
 
 def test_snapshot_ignores_other_devices_hfp() -> None:
-    a2dp = _endpoint("AirPods Pro #3", "BTHENUM", AIRPODS_A2DP, 0x004C)
+    a2dp = _endpoint("AirPods Pro", "BTHENUM", AIRPODS_A2DP, 0x004C)
     other = _endpoint("Technics EAH-AZ100 Hands-Free", "BTHHFENUM", AIRPODS_HFP_NARROW, 0x0094)
     assert not EndpointSnapshot(default=a2dp, active=(a2dp, other)).hfp_also_connected
 

@@ -6,7 +6,7 @@
       ↓   解碼為 32-bit float
     引擎  44.1 kHz → 48 kHz                      ⚠ 有重取樣
       ↓
-    輸出  AirPods Pro #3 · 藍牙 A2DP · 立體聲              ✓實測
+    輸出  AirPods Pro · 藍牙 A2DP · 立體聲              ✓實測
     端點  48 kHz / 16-bit                                ✓實測
     編碼  AAC                                            ⓘ推定
     量測  頻譜截止 20.8 kHz → 與無損相符                    ✓實測

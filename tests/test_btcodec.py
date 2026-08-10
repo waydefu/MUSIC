@@ -64,7 +64,7 @@ def test_hfp_codec_is_derived_from_endpoint_rate(
 ) -> None:
     """HFP 取樣率與編碼是一對一關係，屬於推導而非推定。"""
     endpoint = _endpoint(
-        name="AirPods Pro #3 Hands-Free",
+        name="AirPods Pro Hands-Free",
         transport=TransportKind.BLUETOOTH_HFP,
         sample_rate=sample_rate,
         channels=1,
@@ -90,7 +90,7 @@ def test_unknown_hfp_rate_is_reported_as_unknown(table: CodecTable) -> None:
 
 def test_airpods_on_windows11_infers_aac(table: CodecTable) -> None:
     endpoint = _endpoint(
-        name="AirPods Pro #3",
+        name="AirPods Pro",
         transport=TransportKind.BLUETOOTH_A2DP,
         company_id=0x004C,
     )
@@ -129,7 +129,7 @@ def test_aptx_requires_qualcomm_radio(table: CodecTable) -> None:
 
 def test_windows10_has_no_aac(table: CodecTable) -> None:
     endpoint = _endpoint(
-        name="AirPods Pro #3",
+        name="AirPods Pro",
         transport=TransportKind.BLUETOOTH_A2DP,
         company_id=0x004C,
     )

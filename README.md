@@ -150,6 +150,26 @@ data/              # 應用程式圖示與資料資源
 - macOS 與 Linux 尚未提供平台介面實作及正式安裝包。
 - 音質推估會受到母帶、濾波器、取樣率與編碼器設定影響，結果應視為分析提示。
 
+## 授權
+
+本專案採 **GNU General Public License v3.0**，全文見 [LICENSE](LICENSE)。
+
+選 GPL 不是偏好而是相依關係決定的。播放器直接使用 `mutagen` 讀取標籤，
+而它是 GPL-2.0-or-later；Qt 綁定 `PySide6` 則是 LGPL-3.0 / GPL-2.0 / GPL-3.0
+三擇一。把這些一起打包成執行檔散布時，整體必須以 GPL 相容的條款釋出，
+GPL-3.0 是唯一同時滿足兩者的乾淨選擇。
+
+| 相依套件 | 授權 |
+|---|---|
+| PySide6 / shiboken6 | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only |
+| mutagen | GPL-2.0-or-later |
+| miniaudio | MIT |
+| numpy | BSD-3-Clause 等 |
+
+這代表：你可以自由使用、修改與再散布，但**改作後的版本也必須以 GPL 釋出並附上原始碼**。
+如果需要用在不能開源的專案裡，得先把 `mutagen` 換成授權寬鬆的替代品
+（例如 MIT 的 `tinytag`），並改用 PySide6 的商業授權。
+
 ## 專案連結
 
 - GitHub：<https://github.com/waydefu/MUSIC>
