@@ -345,6 +345,9 @@ class PlayerController(QObject):
 
     @Slot("QStringList")
     def addPaths(self, paths: list[str]) -> None:
+        self._add_paths(paths, autoplay_when_empty=True)
+
+    def _add_paths(self, paths: list[str], *, autoplay_when_empty: bool) -> None:
         tracks = [track for path in paths if (track := read_track(path)) is not None]
         if not tracks:
             return
@@ -353,7 +356,7 @@ class PlayerController(QObject):
         self._reshuffle()
         self.indexChanged.emit()
         self.toast.emit(f"已加入 {len(tracks)} 首")
-        if was_empty:
+        if was_empty and autoplay_when_empty:
             self.playIndex(0)
 
     @Slot(QUrl)
@@ -408,13 +411,13 @@ class PlayerController(QObject):
         return True
 
     @Slot(str)
-    def playLibraryPlaylist(self, folder: str) -> None:
+    def loadLibraryPlaylist(self, folder: str) -> None:
         paths = self._library_playlists.get(folder, ())
         if not paths:
             self.toast.emit("This folder has no playable music.")
             return
         self.clearPlaylist()
-        self.addPaths(list(paths))
+        self._add_paths(list(paths), autoplay_when_empty=False)
 
     @Slot()
     def clearPlaylist(self) -> None:

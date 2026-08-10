@@ -59,11 +59,13 @@ Item {
                 wrapMode: Text.WordWrap
             }
 
-            Row {
+            Item {
                 width: parent.width
-                spacing: 12
+                height: 36
 
                 Text {
+                    id: smallLabel
+                    anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     text: "A"
                     color: Qt.rgba(1, 1, 1, 0.58)
@@ -71,17 +73,24 @@ Item {
                 }
                 Slider {
                     id: fontSlider
-                    width: parent.width - currentLabel.width - 42
+                    anchors.left: smallLabel.right
+                    anchors.leftMargin: 12
+                    anchors.right: currentLabel.left
+                    anchors.rightMargin: 12
+                    anchors.verticalCenter: parent.verticalCenter
                     from: 0.8
                     to: 1.35
                     stepSize: 0.05
+                    snapMode: Slider.SnapAlways
+                    live: true
                     value: Appearance.fontScale
-                    onMoved: {
+                    onValueChanged: {
                         Appearance.fontScale = value;
-                        if (root.controller) {
+                        if (root.controller && Math.abs(root.controller.fontScale - value) > 0.001) {
                             root.controller.setFontScale(value);
                         }
                     }
+                    HoverHandler { cursorShape: Qt.PointingHandCursor }
                     background: Rectangle {
                         x: fontSlider.leftPadding
                         y: fontSlider.topPadding + fontSlider.availableHeight / 2 - height / 2
@@ -109,6 +118,7 @@ Item {
                 }
                 Text {
                     id: currentLabel
+                    anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     text: Math.round(Appearance.fontScale * 100) + "%"
                     color: "white"

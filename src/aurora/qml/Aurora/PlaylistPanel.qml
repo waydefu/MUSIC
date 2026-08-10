@@ -14,10 +14,16 @@ Item {
     property string currentPath: ""
     property color accent: "#7B2FF7"
     property bool open: false
+    property bool canGoBack: false
 
     signal activated(int row)
     signal removed(int row)
     signal searchChanged(string query)
+    signal backRequested()
+
+    function clearSearch() {
+        searchInput.text = "";
+    }
 
     visible: opacity > 0.01
     opacity: open ? 1.0 : 0.0
@@ -40,12 +46,25 @@ Item {
             id: header
             anchors.top: parent.top
             anchors.left: parent.left
-            anchors.margins: 18
+            anchors.topMargin: 18
+            anchors.leftMargin: root.canGoBack ? 54 : 18
             text: Strings.playlist
             color: "white"
             font.pixelSize: (13) * Appearance.fontScale
             font.letterSpacing: 2.2
             font.weight: Font.DemiBold
+        }
+
+        IconButton {
+            anchors.left: parent.left
+            anchors.leftMargin: 14
+            anchors.verticalCenter: header.verticalCenter
+            visible: root.canGoBack
+            icon: "back"
+            flat: true
+            width: 30; height: 30; iconScale: 0.72
+            color: "white"; glow: root.accent
+            onClicked: root.backRequested()
         }
 
         Text {
@@ -69,17 +88,18 @@ Item {
             color: Qt.rgba(1, 1, 1, 0.075)
             border.width: searchInput.activeFocus ? 1 : 0
             border.color: root.accent
+            HoverHandler { cursorShape: Qt.IBeamCursor }
             Text {
                 anchors.left: parent.left; anchors.leftMargin: 11
                 anchors.verticalCenter: parent.verticalCenter
-                text: "⌕"; color: root.accent; font.pixelSize: 19
+                text: "⌕"; color: root.accent; font.pixelSize: 19 * Appearance.fontScale
             }
             TextInput {
                 id: searchInput
                 anchors.left: parent.left; anchors.leftMargin: 35
                 anchors.right: clearSearch.left; anchors.rightMargin: 6
                 anchors.verticalCenter: parent.verticalCenter
-                color: "white"; font.pixelSize: 12; clip: true; selectByMouse: true
+                color: "white"; font.pixelSize: 12 * Appearance.fontScale; clip: true; selectByMouse: true
                 onTextChanged: root.searchChanged(text)
                 Keys.onEscapePressed: {
                     if (text.length > 0) { text = ""; event.accepted = true; }
@@ -89,14 +109,14 @@ Item {
                 anchors.left: searchInput.left; anchors.verticalCenter: parent.verticalCenter
                 visible: searchInput.text.length === 0
                 text: "搜尋歌曲、演出者或專輯"
-                color: Qt.rgba(1, 1, 1, 0.34); font.pixelSize: 12
+                color: Qt.rgba(1, 1, 1, 0.34); font.pixelSize: 12 * Appearance.fontScale
             }
             Text {
                 id: clearSearch
                 anchors.right: parent.right; anchors.rightMargin: 10
                 anchors.verticalCenter: parent.verticalCenter
                 visible: searchInput.text.length > 0
-                text: "×"; color: Qt.rgba(1, 1, 1, 0.65); font.pixelSize: 18
+                text: "×"; color: Qt.rgba(1, 1, 1, 0.65); font.pixelSize: 18 * Appearance.fontScale
                 HoverHandler { cursorShape: Qt.PointingHandCursor }
                 TapHandler { onTapped: searchInput.text = "" }
             }

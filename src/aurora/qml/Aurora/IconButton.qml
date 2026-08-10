@@ -12,7 +12,7 @@ Item {
     id: root
 
     /*! 圖示種類：play / pause / prev / next / shuffle / repeat / repeatOne /
-        volume / mute / folder / list / lyrics / info / settings / close / minimise / mini / cinema / fullscreen */
+        volume / mute / folder / list / lyrics / info / settings / close / minimise / mini / cinema / fullscreen / back */
     property string icon: "play"
     property color color: "#FFFFFF"
     property color glow: "#FFFFFF"
@@ -316,6 +316,19 @@ Item {
                 fillColor: "transparent"
                 capStyle: ShapePath.SquareCap
                 PathSvg { path: "M3,8 L3,3 L8,3 M12,3 L17,3 L17,8 M17,12 L17,17 L12,17 M8,17 L3,17 L3,12" }
+            }
+        }
+        Shape {
+            anchors.fill: parent
+            visible: root.icon === "back"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: 1.8
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M11,4 L5,10 L11,16 M5,10 L17,10" }
             }
         }
 
