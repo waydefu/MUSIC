@@ -18,6 +18,11 @@ from aurora.core.paths import config_file
 
 RepeatMode = Literal["off", "all", "one"]
 QualityPreset = Literal["cinematic", "balanced", "performance"]
+PanelName = Literal["", "playlist", "library", "lyrics", "quality", "settings"]
+
+_PANEL_NAMES: frozenset[str] = frozenset(
+    {"", "playlist", "library", "lyrics", "quality", "settings"}
+)
 
 _REPEAT_MODES: frozenset[str] = frozenset({"off", "all", "one"})
 _QUALITY_PRESETS: frozenset[str] = frozenset({"cinematic", "balanced", "performance"})
@@ -52,9 +57,10 @@ class Config:
 
     window: WindowGeometry = field(default_factory=WindowGeometry)
     mini_mode: bool = False
-    playlist_visible: bool = True
-    lyrics_visible: bool = False
-    quality_visible: bool = False
+    #: 右側面板一次只會開一個，所以用單一字串而不是好幾個布林值 ——
+    #: 布林值可以組合出「兩個都開」這種不存在的狀態，字串則不會。
+    #: 空字串代表全部收起。預設開播放清單，開啟後馬上看得到自己的音樂。
+    open_panel: PanelName = "playlist"
 
     quality_preset: QualityPreset = "cinematic"
     font_scale: float = 1.0
@@ -100,6 +106,8 @@ class Config:
             self.repeat = "off"
         if self.quality_preset not in _QUALITY_PRESETS:
             self.quality_preset = "cinematic"
+        if self.open_panel not in _PANEL_NAMES:
+            self.open_panel = "playlist"
 
         self.playlist = [str(item) for item in self.playlist if isinstance(item, str)]
         self.library_folders = [str(item) for item in self.library_folders if isinstance(item, str)]
@@ -117,10 +125,16 @@ class Config:
 
 
 def load_config(path: Path | None = None) -> Config:
-    """讀設定；檔案不存在、格式壞掉、或內容不是物件時一律回預設值。"""
+    """讀設定；檔案不存在、格式壞掉、或內容不是物件時一律回預設值。
+
+    編碼用 ``utf-8-sig`` 而不是 ``utf-8``：Windows 上的記事本、PowerShell 的
+    ``Out-File -Encoding utf8`` 等工具寫出來的 UTF-8 都帶 BOM，而 ``json.loads``
+    看到 BOM 會直接拋 JSONDecodeError —— 結果就是使用者手動編輯過設定檔之後，
+    所有設定無聲無息地全部回到預設值。``utf-8-sig`` 兩種都吃得下。
+    """
     target = path or config_file()
     try:
-        raw = json.loads(target.read_text(encoding="utf-8"))
+        raw = json.loads(target.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return Config()
 

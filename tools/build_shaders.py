@@ -22,9 +22,12 @@ SHADER_DIR = ROOT / "src" / "aurora" / "qml" / "Aurora" / "shaders"
 
 #: 轉譯目標。涵蓋 D3D11(HLSL 5.0)、Metal、以及桌面與行動的 GLSL 版本。
 TARGETS = [
-    "--glsl", "100es,120,150",
-    "--hlsl", "50",
-    "--msl", "12",
+    "--glsl",
+    "100es,120,150",
+    "--hlsl",
+    "50",
+    "--msl",
+    "12",
 ]
 
 

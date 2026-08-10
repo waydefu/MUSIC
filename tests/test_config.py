@@ -34,6 +34,20 @@ def test_missing_file_returns_defaults(tmp_path: Path) -> None:
     assert config.volume == 0.8
 
 
+def test_utf8_bom_is_tolerated(tmp_path: Path) -> None:
+    """記事本與 PowerShell 寫出的 UTF-8 都帶 BOM。若不處理，
+    使用者手動編輯過設定檔之後所有設定會無聲無息地回到預設值。"""
+    target = tmp_path / "config.json"
+    target.write_text(
+        json.dumps({"volume": 0.33, "window": {"x": 60, "y": 30, "width": 1600, "height": 1000}}),
+        encoding="utf-8-sig",
+    )
+    config = load_config(target)
+    assert config.volume == 0.33
+    assert config.window.width == 1600
+    assert config.window.height == 1000
+
+
 def test_corrupt_json_returns_defaults_instead_of_raising(tmp_path: Path) -> None:
     """設定檔壞掉絕不能讓播放器開不起來。"""
     target = tmp_path / "config.json"

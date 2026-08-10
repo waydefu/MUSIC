@@ -15,7 +15,12 @@ def test_playlist_filter_matches_title_artist_album_and_path() -> None:
     playlist = PlaylistModel()
     playlist.append(
         [
-            Track(path="D:/Music/Night Drive.flac", title="Night Drive", artist="AURORA", album="Skies"),
+            Track(
+                path="D:/Music/Night Drive.flac",
+                title="Night Drive",
+                artist="AURORA",
+                album="Skies",
+            ),
             Track(path="D:/Music/Quiet.wav", title="Quiet", artist="Elsewhere", album="Ambient"),
         ]
     )

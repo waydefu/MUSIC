@@ -328,6 +328,10 @@ Window {
             // 底部控制列
             Item {
                 id: bottomBar
+                // objectName 讓診斷工具能精準定位這些關鍵元件。
+                // QML 的 id 在執行期取不到，型別名稱又會被混淆，
+                // 沒有 objectName 就只能從截圖猜版面問題。
+                objectName: "bottomBar"
                 anchors.bottom: parent.bottom
                 anchors.left: parent.left
                 anchors.right: parent.right
@@ -347,6 +351,7 @@ Window {
 
                 SeekBar {
                     id: seek
+                    objectName: "seekBar"
                     anchors.top: parent.top
                     anchors.left: timeLeft.right
                     anchors.right: timeRight.left
@@ -378,6 +383,7 @@ Window {
                 }
 
                 TransportControls {
+                    objectName: "transport"
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.bottom: parent.bottom
                     playing: player.playing
@@ -706,11 +712,19 @@ Window {
 
     // ------------------------------------------------------------ 狀態
 
-    property bool playlistOpen: false
-    property bool libraryOpen: false
-    property bool lyricsOpen: false
-    property bool qualityOpen: false
-    property bool settingsOpen: false
+    /*! 右側面板一次只開一個。狀態存在設定檔裡，所以下次開啟會回到同一個面板。
+        五個布林值全部由這一個字串推導 —— 布林值可以組合出「兩個都開」
+        這種不存在的狀態，單一字串則從結構上就不可能。 */
+    property string openPanel: player.openPanel
+
+    readonly property bool playlistOpen: openPanel === "playlist"
+    readonly property bool libraryOpen: openPanel === "library"
+    readonly property bool lyricsOpen: openPanel === "lyrics"
+    readonly property bool qualityOpen: openPanel === "quality"
+    readonly property bool settingsOpen: openPanel === "settings"
+
+    onOpenPanelChanged: player.setOpenPanel(openPanel)
+
     property bool cinema: false
     property bool fullScreen: false
     property bool miniMode: false
@@ -735,11 +749,7 @@ Window {
         } else {
             if (fullScreen) { toggleFullscreen(); }
             cinema = false;
-            playlistOpen = false;
-            libraryOpen = false;
-            lyricsOpen = false;
-            qualityOpen = false;
-            settingsOpen = false;
+            openPanel = "";
             normalWidth = width; normalHeight = height;
             miniMode = true; width = 540; height = 180;
         }
@@ -747,40 +757,28 @@ Window {
     }
 
     function togglePanel(name) {
-        const wasOpen = (name === "playlist" && playlistOpen)
-                     || (name === "library" && libraryOpen)
-                     || (name === "lyrics" && lyricsOpen)
-                     || (name === "quality" && qualityOpen)
-                     || (name === "settings" && settingsOpen);
-        playlistOpen = !wasOpen && name === "playlist";
-        libraryOpen = !wasOpen && name === "library";
-        lyricsOpen = !wasOpen && name === "lyrics";
-        qualityOpen = !wasOpen && name === "quality";
-        settingsOpen = !wasOpen && name === "settings";
+        openPanel = (openPanel === name) ? "" : name;
     }
 
     function openLibraryPlaylist(folder) {
         player.loadLibraryPlaylist(folder);
         playlistPanel.clearSearch();
         playlistFromLibrary = true;
-        playlistOpen = true;
-        libraryOpen = false;
-        lyricsOpen = false;
-        qualityOpen = false;
-        settingsOpen = false;
+        openPanel = "playlist";
     }
 
     function returnToLibrary() {
-        playlistOpen = false;
-        libraryOpen = true;
+        openPanel = "library";
         playlistFromLibrary = false;
     }
 
-    FileDialog {
+    // Qt 6 的 FileDialog 沒有 OpenDirectory 這個 fileMode（只有 OpenFile /
+    // OpenFiles / SaveFile），指定它會得到 undefined，對話框於是以「選檔案」
+    // 模式開啟，根本選不到資料夾。選資料夾在 Qt 6 是獨立的 FolderDialog。
+    FolderDialog {
         id: libraryFolderDialog
         title: "選擇音樂資料夾"
-        fileMode: FileDialog.OpenDirectory
-        onAccepted: player.addLibraryFolder(selectedFile)
+        onAccepted: player.addLibraryFolder(selectedFolder)
     }
 
     // 音樂能量的單一來源。所有視覺元件都綁這裡，共用同一個節拍。
@@ -801,11 +799,7 @@ Window {
         }
         function onLibraryFolderAdded() {
             window.playlistFromLibrary = false;
-            window.libraryOpen = true;
-            window.playlistOpen = false;
-            window.lyricsOpen = false;
-            window.qualityOpen = false;
-            window.settingsOpen = false;
+            window.openPanel = "library";
         }
         function onFontScaleChanged() {
             Appearance.fontScale = player.fontScale;
@@ -886,11 +880,7 @@ Window {
             } else if (window.cinema) {
                 window.cinema = false;
             } else {
-                window.playlistOpen = false;
-                window.libraryOpen = false;
-                window.lyricsOpen = false;
-                window.qualityOpen = false;
-                window.settingsOpen = false;
+                window.openPanel = "";
             }
         }
     }

@@ -48,6 +48,7 @@ class PlayerController(QObject):
     trackChanged = Signal()
     positionChanged = Signal()
     frameAdvanced = Signal()
+    panelChanged = Signal()
     playingChanged = Signal()
     volumeChanged = Signal()
     shuffleChanged = Signal()
@@ -199,6 +200,22 @@ class PlayerController(QObject):
     @Property(str, notify=trackChanged)
     def durationText(self) -> str:
         return _clock(self._engine.duration)
+
+    @Property(str, notify=panelChanged)
+    def openPanel(self) -> str:
+        """目前展開的右側面板名稱，空字串代表全部收起。
+
+        存在設定檔裡，所以下次開啟播放器會回到同一個面板 ——
+        先前這個狀態雖然有欄位卻從來沒被讀寫過，面板永遠是收起的。
+        """
+        return str(self._config.open_panel)
+
+    @Slot(str)
+    def setOpenPanel(self, name: str) -> None:
+        if name == self._config.open_panel:
+            return
+        self._config.open_panel = name  # type: ignore[assignment]
+        self.panelChanged.emit()
 
     @Property(bool, notify=playingChanged)
     def playing(self) -> bool:

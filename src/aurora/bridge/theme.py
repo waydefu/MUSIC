@@ -39,9 +39,7 @@ def _image_to_array(image: QImage) -> npt.NDArray[np.uint8] | None:
     raw = np.frombuffer(bytes(scaled.constBits()), dtype=np.uint8)
     if raw.size < stride * height:
         return None
-    return raw[: stride * height].reshape(height, stride)[:, : width * 3].reshape(
-        height, width, 3
-    )
+    return raw[: stride * height].reshape(height, stride)[:, : width * 3].reshape(height, width, 3)
 
 
 class ThemeController(QObject):

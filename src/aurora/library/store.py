@@ -118,9 +118,7 @@ class LibraryCache:
         }
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
-            temporary.write_text(
-                json.dumps(payload, ensure_ascii=False), encoding="utf-8"
-            )
+            temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
             os.replace(temporary, target)
         except OSError:
             temporary.unlink(missing_ok=True)
