@@ -59,6 +59,43 @@ def _set(key_path: str, name: str | None, value: str) -> None:
         winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
 
 
+def repair_open_with_entry() -> bool:
+    """修正檔案總管自動建立的 ``Applications\\AURORA.exe`` 項目。
+
+    使用者第一次用「開啟方式」手動挑選執行檔時，檔案總管會自己建一個
+    ``HKCU\\Software\\Classes\\Applications\\<檔名>`` 項目，並把 ``UserChoice``
+    指向它。那個項目記的是**當時挑選的絕對路徑**。
+
+    問題在於 ``UserChoice`` 受雜湊保護，程式改不動；一旦執行檔被搬移或重新
+    安裝到別的位置，這個項目就指向不存在的檔案，雙擊音樂檔會失敗或跳出
+    選取視窗，而且使用者完全看不出原因。
+
+    我們不能改 ``UserChoice``，但可以把它指向的那個項目的命令列修正過來 ——
+    效果一樣，而且不必請使用者重新挑一次。順便補上 FriendlyAppName，
+    否則清單裡只會顯示冷冰冰的「AURORA.exe」。
+    """
+    executable = executable_path()
+    name = Path(executable).name
+    key_path = rf"{_CLASSES}\Applications\{name}"
+
+    try:
+        winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path).Close()
+    except FileNotFoundError:
+        return False  # 使用者從沒手動挑過，沒有需要修的東西
+
+    try:
+        _set(rf"{key_path}\shell\open\command", None, _open_command())
+        _set(key_path, "FriendlyAppName", APP_DISPLAY_NAME)
+        _set(rf"{key_path}\SupportedTypes", ".mp3", "")
+        for extension in sorted(AUDIO_EXTENSIONS):
+            _set(rf"{key_path}\SupportedTypes", extension, "")
+    except OSError:
+        return False
+
+    _notify_shell()
+    return True
+
+
 def register_file_types() -> bool:
     """建立 ProgID 與副檔名關聯。回傳是否全部成功。
 
@@ -96,6 +133,11 @@ def register_file_types() -> bool:
         _set(_REGISTERED_APPS, "AURORA", _CAPABILITIES_KEY)
     except OSError:
         return False
+
+    # 使用者可能早就手動挑過執行檔，而那個項目記的是舊路徑。
+    # 重新註冊時順手修好，否則新舊兩個項目會同時出現在「開啟方式」清單裡，
+    # 其中一個還是死的。
+    repair_open_with_entry()
 
     _notify_shell()
     return True

@@ -18,7 +18,7 @@ from aurora.core.config import Config, load_config
 from aurora.core.constants import AUDIO_EXTENSIONS
 from aurora.core.paths import data_file, qml_root
 from aurora.library.scanner import iter_audio_files
-from aurora.platform_win.fileassoc import register_file_types
+from aurora.platform_win.fileassoc import register_file_types, unregister_file_types
 
 
 def _configure_engine(
@@ -122,14 +122,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="把 AURORA 註冊為音訊檔的開啟方式，然後結束。",
     )
     parser.add_argument(
+        "--unregister-file-types",
+        action="store_true",
+        help="移除檔案關聯，然後結束。解除安裝時使用。",
+    )
+    parser.add_argument(
         "files",
         nargs="*",
         help="要播放的音訊檔或資料夾。檔案關聯與「開啟方式」會用到。",
     )
     options = parser.parse_args(argv)
 
+    # 這兩個是安裝／解除安裝腳本用的，不需要建立視窗，做完就結束。
     if options.register_file_types:
         return 0 if register_file_types() else 1
+    if options.unregister_file_types:
+        return 0 if unregister_file_types() else 1
 
     # Qt Quick Controls 在 Windows 上預設走原生樣式，而原生樣式**不允許**
     # 覆寫 background / handle 之類的內部項目 —— 自訂寫了也會被靜靜忽略，
