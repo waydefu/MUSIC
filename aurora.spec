@@ -162,8 +162,8 @@ _before = (len(a.binaries), len(a.datas))
 a.binaries = [item for item in a.binaries if _keep(item, UNWANTED_BINARIES)]
 a.datas = [item for item in a.datas if _keep(item, UNWANTED_DATA)]
 print(
-    f"[aurora.spec] 過濾二進位 {_before[0]} → {len(a.binaries)}，"
-    f"資源 {_before[1]} → {len(a.datas)}"
+    f"[aurora.spec] binaries {_before[0]} -> {len(a.binaries)}, "
+    f"resources {_before[1]} -> {len(a.datas)}"
 )
 
 pyz = PYZ(a.pure)  # noqa: F821

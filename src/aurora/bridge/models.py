@@ -75,6 +75,15 @@ _ALBUM_ROLE = Qt.ItemDataRole.UserRole + 4
 _DURATION_ROLE = Qt.ItemDataRole.UserRole + 5
 _COVER_ROLE = Qt.ItemDataRole.UserRole + 6
 _LOSSLESS_ROLE = Qt.ItemDataRole.UserRole + 7
+_TRACK_ROLES = [
+    _PATH_ROLE,
+    _TITLE_ROLE,
+    _ARTIST_ROLE,
+    _ALBUM_ROLE,
+    _DURATION_ROLE,
+    _COVER_ROLE,
+    _LOSSLESS_ROLE,
+]
 
 
 def _duration_text(seconds: float) -> str:
@@ -153,6 +162,28 @@ class PlaylistModel(QAbstractListModel):
 
     def track_at(self, row: int) -> Track | None:
         return self._tracks[row] if 0 <= row < len(self._tracks) else None
+
+    def replace_at(self, row: int, track: Track) -> bool:
+        """原地補齊一列的 metadata，不重設模型或改變目前選取位置。"""
+        if not 0 <= row < len(self._tracks):
+            return False
+        self._tracks[row] = track
+        changed = self.index(row, 0)
+        self.dataChanged.emit(changed, changed, _TRACK_ROLES)
+        return True
+
+    def update_track(self, track: Track) -> tuple[int, ...]:
+        """以路徑更新所有相符列，供背景 metadata 載入完成時使用。"""
+        target = track.path.casefold()
+        updated: list[int] = []
+        for row, current in enumerate(self._tracks):
+            if current.path.casefold() != target:
+                continue
+            self._tracks[row] = track
+            changed = self.index(row, 0)
+            self.dataChanged.emit(changed, changed, _TRACK_ROLES)
+            updated.append(row)
+        return tuple(updated)
 
     def index_of(self, path: str) -> int:
         lowered = path.lower()

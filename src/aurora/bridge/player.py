@@ -22,14 +22,16 @@ from PySide6.QtCore import Property, QObject, QTimer, QUrl, Signal, Slot
 
 from aurora.audio.engine import AudioEngine
 from aurora.bridge.lyrics import LyricsController
+from aurora.bridge.metadata_loader import MetadataLoader
 from aurora.bridge.models import PlaylistFilterProxy, PlaylistModel, SpectrumModel
 from aurora.bridge.quality import QualityController
 from aurora.bridge.theme import ThemeController
 from aurora.core.config import Config, save_config
 from aurora.core.constants import AUDIO_EXTENSIONS, SEEK_STEP_SEC, UI_TICK_HZ, VOLUME_STEP
 from aurora.core.models import Track
-from aurora.library.metadata import read_track
+from aurora.library.metadata import read_track, read_track_stub
 from aurora.library.scanner import group_audio_files
+from aurora.library.store import LibraryCache
 from aurora.platform_win.fileassoc import (
     is_registered,
     open_default_apps_settings,
@@ -85,6 +87,10 @@ class PlayerController(QObject):
         self._bass = 0.0
         self._shuffle_order: list[int] = []
         self._library_playlists: dict[str, tuple[str, ...]] = {}
+        self._cache = LibraryCache()
+        self._cache.load()
+        self._metadata_loader = MetadataLoader()
+        self._pending_metadata_paths: set[str] = set()
         self._engine.volume = config.volume
         self._engine.muted = config.muted
 
@@ -94,6 +100,16 @@ class PlayerController(QObject):
         self._timer = QTimer(self)
         self._timer.setInterval(max(1, 1000 // UI_TICK_HZ))
         self._timer.timeout.connect(self._tick)
+
+        self._cache_save_timer = QTimer(self)
+        self._cache_save_timer.setSingleShot(True)
+        self._cache_save_timer.setInterval(1000)
+        self._cache_save_timer.timeout.connect(self._save_cache)
+
+        self._metadata_start_timer = QTimer(self)
+        self._metadata_start_timer.setSingleShot(True)
+        self._metadata_start_timer.setInterval(250)
+        self._metadata_start_timer.timeout.connect(self._start_metadata_enrichment)
 
     # ------------------------------------------------------------ 子物件
 
@@ -377,18 +393,33 @@ class PlayerController(QObject):
         *,
         autoplay_when_empty: bool,
         announce: bool = True,
-    ) -> None:
-        tracks = [track for path in paths if (track := read_track(path)) is not None]
+    ) -> int:
+        tracks: list[Track] = []
+        pending: list[str] = []
+        for path in paths:
+            track = self._cache.get(Path(path))
+            if track is None:
+                track = read_track_stub(path)
+                if track is not None:
+                    pending.append(track.path)
+            if track is not None:
+                tracks.append(track)
         if not tracks:
-            return
+            return 0
         was_empty = self._playlist.rowCount() == 0
+        first_added = self._playlist.rowCount()
         self._playlist.append(tracks)
         self._reshuffle()
         self.indexChanged.emit()
         if announce:
             self.toast.emit(f"已加入 {len(tracks)} 首")
         if was_empty and autoplay_when_empty:
-            self.playIndex(0)
+            self.playIndex(first_added)
+
+        # playIndex() 會同步補齊真正要播的那一首；其餘曲目才排入背景，避免
+        # 「先解析整張清單，最後才播放」的長時間等待。
+        self._queue_metadata(pending)
+        return len(tracks)
 
     @Slot(QUrl)
     def addLibraryFolder(self, folder: QUrl) -> None:
@@ -483,10 +514,11 @@ class PlayerController(QObject):
         """
         self._quality.start()
         self._timer.start()
-        self._refresh_library()
         self._restore(resume=not opened_paths)
         if opened_paths:
             self.openPaths(opened_paths)
+        # 外部點歌時，先建立串流再列舉音樂庫；大型或網路資料夾不再擋在播放前。
+        self._refresh_library()
 
     # ------------------------------------------------------------ 檔案關聯
 
@@ -523,13 +555,17 @@ class PlayerController(QObject):
     def openPaths(self, paths: list[str]) -> None:
         """把檔案加入清單並從第一首開始播。供檔案關聯使用。"""
         first = self._playlist.rowCount()
-        self.addPaths(paths)
-        if self._playlist.rowCount() > first:
+        added = self._add_paths(paths, autoplay_when_empty=False)
+        if added:
             self.playIndex(first)
 
     def shutdown(self) -> None:
         self._timer.stop()
         self._quality.stop()
+        self._metadata_start_timer.stop()
+        self._metadata_loader.close()
+        self._drain_metadata()
+        self._cache.save()
         self._persist()
         self._engine.close()
 
@@ -539,6 +575,7 @@ class PlayerController(QObject):
         track = self._playlist.track_at(row)
         if track is None:
             return
+        track = self._ensure_track_metadata(row, track)
         self._index = row
         # load() 內部會先 stop()，所以播放狀態一定變成停止。少了這個訊號，
         # QML 會停在舊的「播放中」狀態，開啟時就看到一顆暫停鍵卻沒有聲音。
@@ -551,6 +588,60 @@ class PlayerController(QObject):
         self.trackChanged.emit()
         self.positionChanged.emit()
         self.playingChanged.emit()
+
+    def _ensure_track_metadata(self, row: int, fallback: Track) -> Track:
+        """只為即將播放的曲目同步讀完整資料；單首不會被整張清單拖累。"""
+        cached = self._cache.get(Path(fallback.path))
+        if cached is not None:
+            self._playlist.replace_at(row, cached)
+            return cached
+
+        track = read_track(fallback.path)
+        if track is None:
+            return fallback
+        self._playlist.replace_at(row, track)
+        self._cache.put(track)
+        self._schedule_cache_save()
+        return track
+
+    def _drain_metadata(self) -> None:
+        """在 Qt 主執行緒把背景結果寫回模型與持久化快取。"""
+        ready = self._metadata_loader.take_ready()
+        if not ready:
+            return
+
+        current_updated = False
+        for track in ready:
+            self._cache.put(track)
+            updated_rows = self._playlist.update_track(track)
+            current_updated = current_updated or self._index in updated_rows
+
+        self._schedule_cache_save()
+        if current_updated:
+            current = self._track
+            if current is not None:
+                self._quality.set_track(current)
+            self.trackChanged.emit()
+
+    def _queue_metadata(self, paths: list[str]) -> None:
+        """合併短時間內的請求，讓點歌與第一幀 UI 先完成再啟動磁碟工作。"""
+        self._pending_metadata_paths.update(path for path in paths if path)
+        if self._pending_metadata_paths and not self._metadata_start_timer.isActive():
+            self._metadata_start_timer.start()
+
+    def _start_metadata_enrichment(self) -> None:
+        pending = tuple(self._pending_metadata_paths)
+        self._pending_metadata_paths.clear()
+        self._metadata_loader.request(
+            path for path in pending if self._cache.get(Path(path)) is None
+        )
+
+    def _schedule_cache_save(self) -> None:
+        if not self._cache_save_timer.isActive():
+            self._cache_save_timer.start()
+
+    def _save_cache(self) -> None:
+        self._cache.save()
 
     def _advance(self, step: int, manual: bool = False) -> None:
         count = self._playlist.rowCount()
@@ -596,6 +687,7 @@ class PlayerController(QObject):
             self.toast.emit(f"輸出已對齊 {rate / 1000:g} kHz")
 
     def _tick(self) -> None:
+        self._drain_metadata()
         dt = 1.0 / UI_TICK_HZ
         frame = self._engine.analyzer.tick(dt)
         self._spectrum.apply(frame)
