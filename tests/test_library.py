@@ -3,16 +3,48 @@
 from __future__ import annotations
 
 import shutil
+import time
 from pathlib import Path
 
 import pytest
 
+from aurora.bridge.metadata_loader import MetadataLoader
 from aurora.core.lrc import parse_lrc
-from aurora.library.metadata import read_lyrics_text, read_track
+from aurora.library.metadata import read_lyrics_text, read_track, read_track_stub
 from aurora.library.scanner import group_audio_files, iter_audio_files, scan
 from aurora.library.store import LibraryCache
 
 # ------------------------------------------------------------------ 標籤
+
+
+def test_track_stub_does_not_parse_tags_or_cover(generated_dir: Path) -> None:
+    source = generated_dir / "test_320k.mp3"
+    stub = read_track_stub(source)
+
+    assert stub is not None
+    assert stub.title == "test_320k"
+    assert stub.artist == ""
+    assert stub.duration_sec == 0.0
+    assert stub.cover_path is None
+    assert stub.size == source.stat().st_size
+
+
+def test_metadata_loader_returns_full_tracks_in_background(generated_dir: Path) -> None:
+    paths = [str(generated_dir / name) for name in ("test_320k.mp3", "test.flac", "test.ogg")]
+    loader = MetadataLoader(batch_size=2)
+    ready = []
+    try:
+        loader.request(paths)
+        deadline = time.monotonic() + 5.0
+        while len(ready) < len(paths) and time.monotonic() < deadline:
+            ready.extend(loader.take_ready())
+            time.sleep(0.01)
+    finally:
+        loader.close()
+
+    assert {track.path for track in ready} == set(paths)
+    assert all(track.title == "測試曲目" for track in ready)
+    assert all(track.duration_sec > 0 for track in ready)
 
 
 @pytest.mark.parametrize(

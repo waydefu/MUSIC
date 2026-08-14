@@ -127,6 +127,30 @@ def _audio_format(info: object, suffix: str) -> AudioFormat | None:
     return AudioFormat(rate, channels, bits)
 
 
+def read_track_stub(path: str | Path) -> Track | None:
+    """只讀檔案系統資訊，建立可立即顯示的輕量曲目。
+
+    完整的 :func:`read_track` 會開啟容器、解析標籤並抽出內嵌封面；一次讀幾百首時
+    這些工作不適合放在 Qt 主執行緒。播放清單先用這個版本顯示檔名，背景讀取完成
+    後再以完整 ``Track`` 原地替換，使用者不必等整張清單解析完才能播放。
+    """
+    target = Path(path)
+    try:
+        stat = target.stat()
+    except OSError:
+        return None
+
+    suffix = target.suffix.lower()
+    return Track(
+        path=str(target),
+        title=target.stem,
+        codec=suffix.lstrip("."),
+        lossless=suffix in _LOSSLESS_SUFFIXES,
+        mtime=stat.st_mtime,
+        size=stat.st_size,
+    )
+
+
 def read_track(path: str | Path) -> Track | None:
     """讀出一首曲目的完整中繼資料。任何解析失敗都回傳 ``None``，不拋例外。"""
     target = Path(path)

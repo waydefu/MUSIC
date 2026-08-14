@@ -13,6 +13,7 @@ reaches a running state before shipping it anywhere.
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -69,7 +70,12 @@ def build() -> int:
         "--clean",
         str(SPEC),
     ]
-    return subprocess.run(command, cwd=ROOT, check=False).returncode
+    environment = os.environ.copy()
+    # CI、排程器或被 redirect 的 Windows console 可能退回 cp1252。spec 檔在
+    # Analysis 階段會輸出統計，明確固定 UTF-8，避免建置完成前才因 log 編碼失敗。
+    environment["PYTHONIOENCODING"] = "utf-8"
+    environment["PYTHONUTF8"] = "1"
+    return subprocess.run(command, cwd=ROOT, check=False, env=environment).returncode
 
 
 def inspect() -> int:

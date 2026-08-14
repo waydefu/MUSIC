@@ -22,6 +22,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from aurora import __version__
 
+
+def _configure_output() -> None:
+    """讓 redirect／CI 下的中文發行日誌不受 Windows ANSI code page 限制。"""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
+_configure_output()
+
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "dist" / "AURORA"
 PACKAGING = ROOT / "packaging"
