@@ -20,6 +20,9 @@ screenshots/
 .vscode/
 .idea/
 
+# Claude Code 的 worktree 暫存區（.claude/skills 與 .claude/rules 仍進版控）
+.claude/worktrees/
+
 # Windows
 Thumbs.db
 desktop.ini

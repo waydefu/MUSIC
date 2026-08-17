@@ -120,15 +120,10 @@ flowchart TB
 
 ## 驗證路線
 
-```powershell
-uv run ruff check .
-uv run mypy
-uv run pytest
-$env:QT_QPA_PLATFORM = "offscreen"
-uv run aurora --validate-qml
-```
+命令與品質基準見 [README.md](README.md) 的「品質檢查」；
+依變更類型該跑哪些 gate、以及結論該怎麼標示證據等級，見 [AGENTS.md](AGENTS.md)。
 
-針對點歌延遲，至少守住以下回歸條件：
+針對點歌延遲，本文件負責界定的回歸條件是：
 
 - `read_track_stub()` 不解析標籤、時長或封面。
 - `MetadataLoader` 能在背景回傳完整曲目。
