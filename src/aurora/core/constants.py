@@ -1,7 +1,8 @@
 """全專案常數的單一集中地。
 
 規約：任何模組都不得自行寫死數字常數，一律從這裡取。
-QML 側的動效與色彩 token 另外集中在 ``qml/Motion.qml`` 與 ``qml/Palette.qml``。
+QML 側的動效 token 另外集中在 ``qml/Aurora/Motion.qml``；
+配色不在 QML，而是由 ``core/models.py`` 的 ``Palette`` 經 ``bridge/theme.py`` 提供。
 """
 
 from __future__ import annotations

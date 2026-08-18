@@ -136,6 +136,7 @@ dist/AURORA/AURORA.exe
 ## 品質檢查
 
 ```powershell
+uv run python tools/make_test_audio.py   # 只需跑一次，產生測試素材
 uv run ruff check .
 uv run mypy
 uv run pytest
@@ -147,11 +148,16 @@ uv run aurora --validate-qml
 
 - Ruff：通過
 - mypy：33 個來源檔通過
-- pytest：187 個測試通過
+- pytest：209 個測試通過
 - QML 離屏載入：通過
 - Windows 打包版冷啟動：通過
 
-部分標記為 `win` 或 `audio` 的測試會使用 Windows 音訊子系統或實際音訊裝置。
+測試素材由 `tools/make_test_audio.py` 產生到 `tests/_generated/`（需要 `ffmpeg`，
+不進版控）。**素材不存在時相關測試會 skip 而不是失敗** —— 此時 `pytest` 會顯示
+157 passed、52 skipped，那不是完整的套件。
+
+標記為 `audio` 的三個測試會實際開啟音訊裝置（預設會跑，`-m "not audio"` 可排除）。
+`platform_win` 的測試則以 `sys.platform` 判斷，非 Windows 環境自動跳過。
 
 ## 音訊與音質分析說明
 
@@ -177,8 +183,11 @@ src/aurora/
 
 tests/             # 單元、整合及 Windows 音訊測試
 tools/             # EXE 建置與開發工具
+packaging/         # 安裝／解除安裝腳本與發行說明
 data/              # 應用程式圖示與資料資源
 ```
+
+程式協作 agent 的作業規範（驗證契約、不變量、安全邊界）見 [AGENTS.md](AGENTS.md)。
 
 ### 點歌載入效能
 
@@ -213,5 +222,5 @@ GPL-3.0 是唯一同時滿足兩者的乾淨選擇。
 ## 專案連結
 
 - GitHub：<https://github.com/waydefu/MUSIC>
-- 開發分支：`codex/aurora-player-ui`
-- Pull Request：<https://github.com/waydefu/MUSIC/pull/1>
+- 預設分支：`main`
+- Releases：<https://github.com/waydefu/MUSIC/releases>
