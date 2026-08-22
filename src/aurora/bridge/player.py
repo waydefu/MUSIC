@@ -32,12 +32,7 @@ from aurora.core.models import Track
 from aurora.library.metadata import read_track, read_track_stub
 from aurora.library.scanner import group_audio_files
 from aurora.library.store import LibraryCache
-from aurora.platform_win.fileassoc import (
-    is_registered,
-    open_default_apps_settings,
-    register_file_types,
-    unregister_file_types,
-)
+from aurora.platform import adapter
 
 _REPEAT_ORDER = ("off", "all", "one")
 _REPEAT_LABEL = {"off": "不循環", "all": "全部循環", "one": "單曲循環"}
@@ -524,12 +519,12 @@ class PlayerController(QObject):
 
     @Property(bool, notify=fileTypesChanged)
     def fileTypesRegistered(self) -> bool:
-        return is_registered()
+        return adapter().is_registered()
 
     @Slot()
     def registerFileTypes(self) -> None:
         """把 AURORA 加進音訊檔的「開啟方式」。不搶其他播放器的既有關聯。"""
-        if register_file_types():
+        if adapter().register_file_types():
             self.toast.emit("已可用 AURORA 開啟 MP3、FLAC、WAV、OGG")
         else:
             self.toast.emit("註冊失敗，請確認沒有防護軟體阻擋")
@@ -537,7 +532,7 @@ class PlayerController(QObject):
 
     @Slot()
     def unregisterFileTypes(self) -> None:
-        if unregister_file_types():
+        if adapter().unregister_file_types():
             self.toast.emit("已移除檔案關聯")
         self.fileTypesChanged.emit()
 
@@ -548,7 +543,7 @@ class PlayerController(QObject):
         Windows 10 之後只有使用者本人能指定預設處理常式 —— 程式自己設會被
         系統重設。所以這裡只負責把人帶到正確的地方。
         """
-        if not open_default_apps_settings():
+        if not adapter().open_default_apps_settings():
             self.toast.emit("開不了 Windows 設定頁")
 
     @Slot("QStringList")

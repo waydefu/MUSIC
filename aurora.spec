@@ -149,7 +149,12 @@ a = Analysis(  # noqa: F821
         (str(ROOT / "data"), "data"),
         (str(ROOT / "src" / "aurora" / "qml"), "aurora/qml"),
     ],
-    hiddenimports=["_cffi_backend"],
+    # aurora.platform._select() 是在函式內才 import 平台實作的（因為
+    # platform_win 在模組層級就 import winreg，放模組層級會讓 macOS 炸），
+    # 所以 PyInstaller 的靜態分析看不到它。不明列的話打包版會找不到
+    # WindowsAdapter 而**靜默**退化成 NullAdapter —— 音質面板變成一片
+    # 「未知」，卻不會有任何錯誤訊息。
+    hiddenimports=["_cffi_backend", "aurora.platform.windows"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

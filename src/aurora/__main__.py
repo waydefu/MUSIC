@@ -18,7 +18,7 @@ from aurora.core.config import Config, load_config
 from aurora.core.constants import AUDIO_EXTENSIONS
 from aurora.core.paths import data_file, qml_root
 from aurora.library.scanner import iter_audio_files
-from aurora.platform_win.fileassoc import register_file_types, unregister_file_types
+from aurora.platform import adapter
 
 
 def _configure_engine(
@@ -135,9 +135,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # 這兩個是安裝／解除安裝腳本用的，不需要建立視窗，做完就結束。
     if options.register_file_types:
-        return 0 if register_file_types() else 1
+        return 0 if adapter().register_file_types() else 1
     if options.unregister_file_types:
-        return 0 if unregister_file_types() else 1
+        return 0 if adapter().unregister_file_types() else 1
 
     # Qt Quick Controls 在 Windows 上預設走原生樣式，而原生樣式**不允許**
     # 覆寫 background / handle 之類的內部項目 —— 自訂寫了也會被靜靜忽略，

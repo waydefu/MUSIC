@@ -22,7 +22,7 @@ import time
 from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from aurora.core.config import Config, QualityPreset
-from aurora.platform_win.osinfo import system_animations_enabled
+from aurora.platform import adapter
 
 #: 三段預設各自開啟哪些特效。QML 只讀這裡算出來的布林值，不自己判斷。
 _PRESETS: dict[str, dict[str, bool | float]] = {
@@ -77,7 +77,7 @@ class MotionController(QObject):
         super().__init__(parent)
         self._config = config
         self._preset = config.quality_preset
-        self._system_animations = system_animations_enabled()
+        self._system_animations = adapter().system_animations_enabled()
         self._auto_degrade = True
 
         self._frames = 0
@@ -166,7 +166,7 @@ class MotionController(QObject):
     @Slot()
     def followSystemMotion(self) -> None:
         self._config.reduce_motion = None
-        self._system_animations = system_animations_enabled()
+        self._system_animations = adapter().system_animations_enabled()
         self.reduceMotionChanged.emit()
         self.presetChanged.emit()
 

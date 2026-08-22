@@ -4,9 +4,10 @@
 # 本機驗證對方的平台。CI 不是為了省事，是這個組合下唯一能防止互相破壞的機制。
 # 詳見 PROJECT_PLAN.md 的「驗證不對稱」一節。
 #
-# 目前只有 windows job。macOS job 要等 platform 縫完成才加得上去 ——
-# 現在 bridge/quality.py 在模組層級 import platform_win，而後者 import
-# winreg 與 ctypes.wintypes，在 macOS 上連 import 都過不了。
+# 兩個 job 都必須是 required check，缺一不可。這不是形式：
+# 上層走 aurora.platform.adapter() 之後，破壞另一個平台的改動在自己機器上
+# 完全看不出來。tests/test_platform.py 有靜態檢查擋「直接 import
+# platform_win」，但真正證明 macOS 還活著的只有 macos job。
 #
 # 刻意**不**放進 CI 的東西（見 PROJECT_PLAN.md §6.1）：
 #   * -m "audio" 的測試 —— runner 沒有音訊裝置
@@ -109,6 +110,84 @@ jobs:
 
       # Python 的 gate 一行 QML 都不看，這是唯一覆蓋 QML 的自動化檢查。
       # 它只證明「載得起來」，不證明畫面正確。
+      - name: QML 離屏載入
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run aurora --validate-qml
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安裝 uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+
+      - name: 同步相依
+        run: uv sync --dev
+
+      - name: 還原測試素材快取
+        id: fixtures
+        uses: actions/cache@v4
+        with:
+          path: tests/_generated
+          key: fixtures-${{ runner.os }}-${{ hashFiles('tools/make_test_audio.py') }}
+
+      # macOS runner 同樣沒有預裝 ffmpeg（2026-08 確認過 macos-14-Readme），
+      # 但有 Homebrew。brew 的 ffmpeg 相依很多、裝起來慢，所以上面的素材
+      # 快取在這個 job 上比在 Windows 上更有價值。
+      - name: 安裝 ffmpeg
+        if: steps.fixtures.outputs.cache-hit != 'true'
+        run: brew install ffmpeg
+
+      - name: 產生測試素材
+        if: steps.fixtures.outputs.cache-hit != 'true'
+        env:
+          PYTHONUTF8: "1"
+        run: uv run python tools/make_test_audio.py
+
+      - name: 確認素材齊全
+        run: |
+          missing=0
+          for f in test.wav test.flac test.ogg test_128k.mp3 test_320k.mp3 \
+                   fake_lossless.flac cover.png test.lrc test_320k.lrc; do
+            if [ ! -s "tests/_generated/$f" ]; then
+              echo "缺少或為空：tests/_generated/$f"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || { echo "測試素材不完整，測試套件會靜默縮水。"; exit 1; }
+          echo "素材齊全。"
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      # platform_win/ 是 Windows 專屬程式碼，在 macOS 上型別檢查它沒有意義：
+      # typeshed 把 winreg 與 ctypes.wintypes 標成 win32 專屬，這裡會冒出
+      # 41 個 "Module has no attribute" —— 那些不是缺陷，是平台假設不成立。
+      #
+      # --exclude 把它們移出檢查清單，--follow-imports=silent 讓
+      # platform/windows.py 仍然 import 得到型別資訊但不報它們的錯。
+      # 已驗證這個組合仍抓得到其他檔案的真錯（本機注入過一個回傳型別錯誤，
+      # 有被抓到），不是靠關掉檢查換綠燈。
+      #
+      # Windows job 那邊照常做完整檢查（37 檔），這裡是 32 檔。
+      - name: mypy
+        run: uv run mypy --exclude 'platform_win' --follow-imports=silent
+
+      # test_endpoint.py 整檔會依 skipif 跳過（Windows 專屬），這是預期的。
+      # 真正要看的是 core/ library/ audio/ 與 platform 契約在 macOS 上都綠。
+      - name: pytest
+        run: uv run pytest -m "not audio" -rs
+
+      # 這一條是 macOS job 的重點：它會實例化所有控制器（因此走過
+      # platform adapter 的選擇路徑）並載入全部 QML 與著色器。
+      # 只證明載得起來，不證明畫面正確 —— 外觀仍需實機確認。
       - name: QML 離屏載入
         env:
           QT_QPA_PLATFORM: offscreen
