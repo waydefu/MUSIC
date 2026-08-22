@@ -236,6 +236,26 @@ def install_chain(engine: AudioEngine, chain: str) -> None:
         engine.graph.set_stages((equalizer, Limiter(), OutputMeter()))
         equalizer.set_gains([EQ_GAIN_LIMIT_DB] * len(EQ_BAND_HZ))
         return
+    if chain == "spatial":
+        from aurora.core.dynamics import Limiter, OutputMeter
+        from aurora.core.spatial import SpatialUpmix
+
+        upmix = SpatialUpmix()
+        engine.graph.set_stages((upmix, Limiter(), OutputMeter()))
+        upmix.amount = 1.0
+        return
+    if chain == "full":
+        from aurora.core.constants import EQ_BAND_HZ, EQ_GAIN_LIMIT_DB
+        from aurora.core.dynamics import Limiter, OutputMeter
+        from aurora.core.eq import GraphicEqualizer
+        from aurora.core.spatial import SpatialUpmix
+
+        equalizer = GraphicEqualizer()
+        upmix = SpatialUpmix()
+        engine.graph.set_stages((equalizer, upmix, Limiter(), OutputMeter()))
+        equalizer.set_gains([EQ_GAIN_LIMIT_DB] * len(EQ_BAND_HZ))
+        upmix.amount = 1.0
+        return
     raise ValueError(f"未知的 chain：{chain}")
 
 
@@ -364,9 +384,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--chain",
-        choices=("none", "eq"),
+        choices=("none", "eq", "spatial", "full"),
         default="none",
-        help="要掛上去量的 DSP 級聯。eq = 十段全開 +12 dB + 限幅器 + 輸出電表。",
+        help=(
+            "要掛上去量的 DSP 級聯。eq = 十段全開 +12 dB；spatial = upmix 全開；"
+            "full = 兩者疊加。全部再加限幅器與輸出電表。"
+        ),
     )
     parser.set_defaults(mode="offline")
     options = parser.parse_args(argv)
