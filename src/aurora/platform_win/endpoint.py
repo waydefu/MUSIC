@@ -23,9 +23,14 @@ import ctypes
 import struct
 from collections.abc import Callable, Iterator
 from ctypes import POINTER, byref, c_void_p, wintypes
-from dataclasses import dataclass
 
-from aurora.core.models import AudioFormat, EndpointInfo, TransportKind
+from aurora.core.models import (
+    AudioFormat,
+    EndpointInfo,
+    EndpointSnapshot,
+    TransportKind,
+    strip_hfp_suffix,
+)
 from aurora.platform_win.btregistry import (
     BluetoothDevice,
     match_company_id,
@@ -61,9 +66,6 @@ _PKEY_AUDIO_ENGINE_DEVICE_FORMAT = ("{f19f064d-082c-4e27-bc73-6882a1bb8e4c}", 0)
 #: 這些 enumerator 代表訊號沒有經過藍牙壓縮。
 _BLUETOOTH_A2DP_ENUMERATOR = "BTHENUM"
 _BLUETOOTH_HFP_ENUMERATOR = "BTHHFENUM"
-
-#: Windows 會在藍牙耳機的通話端點名稱後面加這些後綴。
-_HFP_NAME_SUFFIXES = (" hands-free ag audio", " hands-free", " hands free")
 
 _WAVE_FORMAT_PCM = 0x0001
 _WAVE_FORMAT_IEEE_FLOAT = 0x0003
@@ -253,14 +255,6 @@ def _mix_format(device: c_void_p) -> AudioFormat | None:
 # ---------------------------------------------------------------- 分類
 
 
-def _strip_hfp_suffix(name: str) -> str:
-    lowered = name.lower()
-    for suffix in _HFP_NAME_SUFFIXES:
-        if lowered.endswith(suffix):
-            return name[: -len(suffix)].strip()
-    return name.strip()
-
-
 def classify_transport(enumerator: str, name: str) -> TransportKind:
     """由 enumerator 判定傳輸型態。這是 100% 可靠的實測值，不是推測。"""
     upper = enumerator.upper()
@@ -270,7 +264,7 @@ def classify_transport(enumerator: str, name: str) -> TransportKind:
         # Windows 11 有時把 A2DP 與 HFP 併成單一端點，這時只剩名稱可分辨
         return (
             TransportKind.BLUETOOTH_HFP
-            if _strip_hfp_suffix(name) != name.strip()
+            if strip_hfp_suffix(name) != name.strip()
             else TransportKind.BLUETOOTH_A2DP
         )
     if not enumerator:
@@ -324,30 +318,6 @@ def _read_endpoint(device: c_void_p, devices: tuple[BluetoothDevice, ...]) -> En
         _release(store)
         if identifier.value:
             _ole32.CoTaskMemFree(identifier)
-
-
-@dataclass(frozen=True, slots=True)
-class EndpointSnapshot:
-    """某一瞬間的輸出裝置狀態。"""
-
-    default: EndpointInfo | None = None
-    active: tuple[EndpointInfo, ...] = ()
-
-    @property
-    def hfp_also_connected(self) -> bool:
-        """目前走 A2DP，但同一支耳機的通話端點也在線上。
-
-        這是實務上最常見的「音質突然變差」原因：某個程式開了麥克風，
-        Windows 就把耳機切成通話模式。提早告訴使用者可以省下很多困惑。
-        """
-        if self.default is None or self.default.transport is not TransportKind.BLUETOOTH_A2DP:
-            return False
-        base = _strip_hfp_suffix(self.default.friendly_name).lower()
-        return any(
-            item.transport is TransportKind.BLUETOOTH_HFP
-            and _strip_hfp_suffix(item.friendly_name).lower() == base
-            for item in self.active
-        )
 
 
 def query_endpoints() -> EndpointSnapshot:

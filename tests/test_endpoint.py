@@ -15,13 +15,9 @@ import pytest
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows 專屬")
 
 from aurora.core.btcodec import HostContext, RadioInfo, default_table, resolve_codec  # noqa: E402
-from aurora.core.models import TransportKind  # noqa: E402
+from aurora.core.models import EndpointSnapshot, TransportKind  # noqa: E402
 from aurora.platform_win.btregistry import BluetoothDevice, match_company_id  # noqa: E402
-from aurora.platform_win.endpoint import (  # noqa: E402
-    EndpointSnapshot,
-    classify_transport,
-    parse_wave_format,
-)
+from aurora.platform_win.endpoint import classify_transport, parse_wave_format  # noqa: E402
 
 # --- 本機實際抓到的 PKEY_AudioEngine_DeviceFormat 位元組 -------------------
 # 註冊表版本前面多了 8 個位元組的標頭，COM 版本沒有。

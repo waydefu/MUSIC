@@ -24,6 +24,7 @@ from aurora.core.constants import ENDPOINT_POLL_MS
 from aurora.core.models import (
     CodecInfo,
     Confidence,
+    EndpointSnapshot,
     QualityReport,
     RolloffResult,
     Track,
@@ -31,7 +32,7 @@ from aurora.core.models import (
 )
 from aurora.core.quality import build_report
 from aurora.platform_win.btregistry import radio_usb_vid
-from aurora.platform_win.endpoint import EndpointSnapshot, query_endpoints
+from aurora.platform_win.endpoint import query_endpoints
 from aurora.platform_win.osinfo import windows_build
 
 _UNKNOWN_CODEC = CodecInfo("未知", Confidence.UNKNOWN, ())
