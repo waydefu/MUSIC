@@ -231,6 +231,23 @@ ROLLOFF_TIERS: Final[tuple[tuple[float, str, int | None], ...]] = (
 #: 誤報比漏報傷害大得多，使用者會不信任整個面板。
 FAKE_LOSSLESS_CUTOFF_HZ: Final = 20000.0
 
+# ---------------------------------------------------------------- HRTF（P2）
+
+#: 球形頭模型的頭半徑（公尺）。0.0875 是 Woodworth／Brown–Duda 文獻慣用的
+#: 成人平均值，它同時決定 ITD 的上限（約 660 µs）與頭部遮蔽的轉折頻率
+#: （c/a ≈ 3.9 krad/s ≈ 620 Hz）。之後接上真人資料集時這個模型只留作
+#: 測試與降級用，不再影響輸出。
+HEAD_RADIUS_M: Final = 0.0875
+#: 音速（公尺／秒），攝氏 20 度的乾空氣。
+SOUND_SPEED_MPS: Final = 343.0
+#: 虛擬 5.1 的喇叭方位角（度，偏離正前方）。ITU-R BS.775 的標準擺位。
+#: 場景左右對稱，所以只記正的一半。
+HRTF_FRONT_AZIMUTH_DEG: Final = 30.0
+HRTF_SURROUND_AZIMUTH_DEG: Final = 110.0
+#: 遠耳高頻增益的下限。Brown–Duda 的 alpha 在接近正側向時會掉到 0，
+#: 那會讓遠耳的高頻整個消失 —— 真實的頭有繞射，不會完全靜音。
+HRTF_SHADOW_MIN_GAIN: Final = 0.1
+
 # ---------------------------------------------------------------- 鼓點偵測
 
 ONSET_FFT_SIZE: Final = 1024
