@@ -849,30 +849,71 @@ dry_mid*(1-a) + wet_mid*a  ==  mid
 （54.6 ms）`。播放沒問題，但歌詞對齊需要用 `processing_latency_frames`
 補償（機制已經存在，尚未接上）。
 
-## 10. 分軌期的交接清單
+## 10. 交接：目前狀態
 
-**架構期已完成，這份清單現在可以直接交出去。**
+> 這一節原本是「Mac 開發者要開工」的清單。B1–B4 已完成（PR #11），
+> 所以改寫成**當前狀態**，讓任何人接手時不必回頭讀整份歷史。
 
-1. **起點就是 `src/aurora/platform/macos.py`。** 它已經在，繼承
-   `NullAdapter`，每個能力都降級但不會壞。檔案的 docstring 就是實作指南：
-   逐一列出每個方法要對應哪個 macOS API、以及**哪些刻意不要做**
-   （`host_context` 與檔案關聯在本階段維持降級，理由都寫在裡面）。
-2. **參考範例**是 `platform/windows.py`，契約在 `platform/base.py`（§4.4）。
-3. **一次覆寫一個方法，每補一個推一次 CI。** 沒覆寫的自動降級，不會壞。
-   建議順序：`system_animations_enabled`（最簡單、且是無障礙硬性要求）
-   → `query_endpoints` → 其餘。
-4. **兩條硬限制**（也寫在 `macos.py` 的 docstring 裡）：
-   macOS 專屬的 import 一律放方法內部，不可放模組層級
-   （`tests/test_platform.py` 會在 Windows 上 import 這個檔案來驗契約）；
-   失敗一律降級不拋例外。
-5. **地雷清單**見 §8.3，**CI 已知的四個坑**見 §9.1。
-6. **哪些檔案不該碰**：`platform_win/`（Windows 實作細節）、`audio/`、
-   `core/dsp*`、`tools/bench_callback.py` —— 這些屬於軌道 A，同時改會衝突。
-7. **AGENTS.md 的證據等級規則**：結論要標 VERIFIED / CODE-ONLY /
-   MANUAL-VERIFICATION-REQUIRED / BLOCKED，不要寫「應該沒問題」。
-   他有實機，所以 §8.2 那幾條可以做到 VERIFIED。
+### 10.1 兩條軌道的完成度
 
----
+| | 項目 | 狀態 |
+|---|---|---|
+| **架構期** | S1 CI ／ S2 benchmark ／ S3 platform 縫 ／ S4 DSP graph | 全部已合併 |
+| **軌道 A** | A1 Aligned A/B ／ A2 EQ 全套 ／ A3 Spatial P1 | 已合併 |
+| | UI（音效面板）、P1.1 距離機制、P1.2 早期反射 | PR #10 待合併 |
+| **軌道 B** | B1 `platform/macos.py`（reduce motion + Core Audio 端點） | 已合併 |
+| | B2 `app_data_dir()` 與快取鍵的 macOS 分支 | 已合併 |
+| | B3 macOS CI job 綠 | 已達成 |
+| | B4 實機驗證 | 由 Mac 開發者持有 |
+
+`platform/macos.py` 目前實作了 `system_animations_enabled` 與
+`query_endpoints`；`host_context` 與三個檔案關聯方法**刻意維持降級**，
+理由寫在該檔的 docstring（`bt_codecs.toml` 只有 Windows 區段；
+macOS 的檔案關聯靠 `Info.plist`，本階段不打包）。
+
+### 10.2 唯一需要決定的事
+
+**全鏈最大設定超出章程 §6.3 的預算**（mean 12.49% / 上限 10%，
+p99 27.68% / 上限 25%）。三個選項與完整量測見 §9.8。
+
+在決定之前不建議繼續往 DSP 鏈加東西 —— 再加只會讓超標更深。
+
+### 10.3 接下來的順序
+
+依實機聽感回饋定下的順序，目前走到 ④：
+
+1. ✅ D/R 距離機制（§9.7）
+2. ✅ 實測 D/R + 響度匹配
+3. ✅ 人工 A/B（實機聽過並接受）
+4. ✅ 早期反射（§9.8）
+5. ⬜ **P1 freeze** —— 需要先解決 §10.2 的預算決定
+6. ⬜ P2 HRTF —— 頭外化。**注意 §9.4 的約束：必須與 Spatial 共用同一個
+   STFT**，不能自己再開一組（預算已經沒有空間）
+
+「定位擠」仍未解決，需要 re-panning。風險比 D/R 高很多（vocal 漂移、
+每個 STFT frame 位置變動），需要 object stability 與時間平滑，
+建議排在 P1 freeze 之後單獨處理。
+
+### 10.4 尚未驗證的項目
+
+| 項目 | 狀態 |
+|---|---|
+| 音效面板外觀（等比例縮放、滑桿吸附） | 實機看過並修正過兩輪；最新一輪未再確認 |
+| 響度補償是否造成抽吸感 | **無法用數字判定**，增益標準差 0.20，需人耳 |
+| 早期反射的實際聽感 | 尚未實機聽過 |
+| 打包版 | 最後一次 `build_exe.py --verify` 在加入 EQ／Spatial／反射之前 |
+
+### 10.5 給接手者的三條教訓
+
+這幾輪反覆踩到同一類問題，寫在這裡避免重蹈：
+
+1. **效能問題要 profile，不要推理。** 本專案推理兩次都錯（詳見 §9.8），
+   profile 一次就對。
+2. **量測指標會被新機制污染。** 加入距離機制後三條測試同時紅燈，成因不是
+   程式錯而是指標同時反映兩個軸。每條測試只隔離一個機制。
+3. **合成訊號不能代表真實音樂。** 加寬效果在合成訊號上是綠的，在真實
+   Dolby Atmos 素材上卻幾乎是零（§9.6）。斷言要用**倍率**而不是方向 ——
+   只看「有變大」抓不到「小到聽不出來」。
 
 ## 11. 明確押後
 
