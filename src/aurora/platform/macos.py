@@ -88,12 +88,24 @@ class MacOSAdapter(NullAdapter):
         objc.objc_getClass.restype = ctypes.c_void_p
         objc.sel_registerName.argtypes = [ctypes.c_char_p]
         objc.sel_registerName.restype = ctypes.c_void_p
+        objc.class_getClassMethod.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        objc.class_getClassMethod.restype = ctypes.c_void_p
+        objc.class_getInstanceMethod.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        objc.class_getInstanceMethod.restype = ctypes.c_void_p
         objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
         workspace_class = objc.objc_getClass(b"NSWorkspace")
         shared_workspace = objc.sel_registerName(b"sharedWorkspace")
         reduce_motion = objc.sel_registerName(b"accessibilityDisplayShouldReduceMotion")
-        if not workspace_class or not shared_workspace or not reduce_motion:
+        if (
+            not workspace_class
+            or not shared_workspace
+            or not reduce_motion
+            # Selector 可以註冊卻沒有實作；直接傳訊息會觸發 Objective-C 例外，
+            # Python 無法攔住。先在 runtime 查詢，舊版 macOS 才能誠實降級。
+            or not objc.class_getClassMethod(workspace_class, shared_workspace)
+            or not objc.class_getInstanceMethod(workspace_class, reduce_motion)
+        ):
             raise RuntimeError("NSWorkspace Objective-C runtime symbols are unavailable")
 
         objc.objc_msgSend.restype = ctypes.c_void_p
@@ -103,6 +115,34 @@ class MacOSAdapter(NullAdapter):
 
         objc.objc_msgSend.restype = ctypes.c_bool
         return bool(objc.objc_msgSend(workspace, reduce_motion))
+
+    @staticmethod
+    def _classify_transport(
+        enumerator: str,
+        name: str,
+        device_format: AudioFormat | None,
+        mix_format: AudioFormat | None,
+    ) -> TransportKind:
+        """將 Core Audio transport FourCC 映射為平台中立的傳輸型態。"""
+        if enumerator == "blue":
+            is_hfp_name = strip_hfp_suffix(name) != name.strip()
+            is_hfp_format = any(
+                audio_format is not None
+                and audio_format.channels == 1
+                and audio_format.sample_rate in (8000, 16000, 32000)
+                for audio_format in (device_format, mix_format)
+            )
+            return (
+                TransportKind.BLUETOOTH_HFP
+                if is_hfp_name or is_hfp_format
+                else TransportKind.BLUETOOTH_A2DP
+            )
+        if enumerator in {"", "blea", "airp", "virt"}:
+            return TransportKind.UNKNOWN
+        if enumerator in {"bltn", "pci ", "usb ", "1394", "hdmi", "dprt", "eavb", "thun", "ccwd"}:
+            return TransportKind.WIRED
+        # Aggregate、網路與未來 transport 不應被誤標成「沒有藍牙壓縮」。
+        return TransportKind.UNKNOWN
 
     def query_endpoints(self) -> EndpointSnapshot:
         """讀出可用輸出端點；Core Audio 出錯時保留空白的安全降級。"""
@@ -172,22 +212,6 @@ class MacOSAdapter(NullAdapter):
         property_nominal_rate = fourcc("nsrt")
         property_virtual_format = fourcc("sfmt")
         property_physical_format = fourcc("pft ")
-        transport_bluetooth = fourcc("blue")
-        transport_bluetooth_le = fourcc("blea")
-        transport_airplay = fourcc("airp")
-        transport_virtual = fourcc("virt")
-        transport_unknown = 0
-        known_local_physical_transports = {
-            fourcc("bltn"),
-            fourcc("pci "),
-            fourcc("usb "),
-            fourcc("1394"),
-            fourcc("hdmi"),
-            fourcc("dprt"),
-            fourcc("eavb"),
-            fourcc("thun"),
-            fourcc("ccwd"),
-        }
         linear_pcm = fourcc("lpcm")
         audio_format_flag_is_float = 1 << 0
         utf8 = 0x08000100
@@ -349,6 +373,10 @@ class MacOSAdapter(NullAdapter):
             )
             if status != 0 or size.value != ctypes.sizeof(description):
                 return None
+            # AudioFormat 僅描述 PCM。若 HAL 報的是壓縮或未知格式，不能把它
+            # 偽裝成整數 PCM；保留 None 才是對音質面板誠實的降級。
+            if description.format_id != linear_pcm:
+                return None
             sample_rate = (
                 float(nominal_rate)
                 if nominal_rate is not None and is_valid_sample_rate(nominal_rate)
@@ -364,43 +392,8 @@ class MacOSAdapter(NullAdapter):
                 sample_rate=round(sample_rate),
                 channels=int(description.channels_per_frame),
                 bits_per_sample=int(description.bits_per_channel),
-                is_float=(
-                    description.format_id == linear_pcm
-                    and bool(description.format_flags & audio_format_flag_is_float)
-                ),
+                is_float=bool(description.format_flags & audio_format_flag_is_float),
             )
-
-        def classify_transport(
-            transport: int | None,
-            name: str,
-            device_format: AudioFormat | None,
-            mix_format: AudioFormat | None,
-        ) -> TransportKind:
-            if transport == transport_bluetooth:
-                effective_format = device_format or mix_format
-                is_hfp_name = strip_hfp_suffix(name) != name.strip()
-                is_hfp_format = (
-                    effective_format is not None
-                    and effective_format.channels == 1
-                    and effective_format.sample_rate in (8000, 16000, 32000)
-                )
-                return (
-                    TransportKind.BLUETOOTH_HFP
-                    if is_hfp_name or is_hfp_format
-                    else TransportKind.BLUETOOTH_A2DP
-                )
-            if transport in {
-                transport_bluetooth_le,
-                transport_airplay,
-                transport_virtual,
-                transport_unknown,
-                None,
-            }:
-                return TransportKind.UNKNOWN
-            if transport in known_local_physical_transports:
-                return TransportKind.WIRED
-            # Aggregate、網路與未來 transport 不應被誤標成「沒有藍牙壓縮」。
-            return TransportKind.UNKNOWN
 
         def read_endpoint(device_id: int) -> EndpointInfo | None:
             # 讀不到 alive 或 output streams 時，不能誠實地稱它為可用的輸出端點。
@@ -416,6 +409,7 @@ class MacOSAdapter(NullAdapter):
             name = read_cf_string(device_id, property_name) or uid
             manufacturer = read_cf_string(device_id, property_manufacturer)
             transport = read_uint32(device_id, property_transport)
+            transport_name = fourcc_text(transport)
             nominal_rate = read_float64(device_id, property_nominal_rate)
             device_format: AudioFormat | None = None
             mix_format: AudioFormat | None = None
@@ -433,9 +427,11 @@ class MacOSAdapter(NullAdapter):
                 id=uid,
                 friendly_name=name,
                 description=manufacturer,
-                enumerator=fourcc_text(transport),
+                enumerator=transport_name,
                 instance_id="",
-                transport=classify_transport(transport, name, device_format, mix_format),
+                transport=self._classify_transport(
+                    transport_name, name, device_format, mix_format
+                ),
                 device_format=device_format,
                 mix_format=mix_format,
                 company_id=None,

@@ -99,6 +99,41 @@ def test_macos_keeps_unimplemented_capabilities_at_null_adapter_defaults() -> No
     assert adapter.open_default_apps_settings() is False
 
 
+@pytest.mark.parametrize(
+    ("enumerator", "name", "device_format", "mix_format", "expected"),
+    (
+        ("blue", "Headphones Hands-Free", None, None, TransportKind.BLUETOOTH_HFP),
+        (
+            "blue",
+            "Headphones",
+            AudioFormat(48000, 2, 24),
+            AudioFormat(16000, 1, 16),
+            TransportKind.BLUETOOTH_HFP,
+        ),
+        (
+            "blue",
+            "Headphones",
+            AudioFormat(48000, 2, 24),
+            AudioFormat(48000, 2, 32, is_float=True),
+            TransportKind.BLUETOOTH_A2DP,
+        ),
+        ("blea", "LE headphones", None, None, TransportKind.UNKNOWN),
+        ("airp", "AirPlay", None, None, TransportKind.UNKNOWN),
+        ("virt", "Virtual device", None, None, TransportKind.UNKNOWN),
+        ("grup", "Aggregate device", None, None, TransportKind.UNKNOWN),
+        ("bltn", "Mac speakers", None, None, TransportKind.WIRED),
+    ),
+)
+def test_macos_classifies_coreaudio_transport_conservatively(
+    enumerator: str,
+    name: str,
+    device_format: AudioFormat | None,
+    mix_format: AudioFormat | None,
+    expected: TransportKind,
+) -> None:
+    assert MacOSAdapter._classify_transport(enumerator, name, device_format, mix_format) is expected
+
+
 def test_platform_selector_uses_macos_adapter_on_darwin(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(platform.sys, "platform", "darwin")
     platform.reset_cache()
@@ -111,11 +146,18 @@ def test_platform_selector_uses_macos_adapter_on_darwin(monkeypatch: pytest.Monk
 @pytest.mark.skipif(sys.platform != "darwin", reason="Core Audio is only available on macOS")
 def test_coreaudio_snapshot_is_coherent_on_a_real_macos_host() -> None:
     """沒有輸出端點的 hosted runner 應 skip，不把環境限制誤報成產品故障。"""
-    snapshot = MacOSAdapter().query_endpoints()
-    if snapshot.default is None:
+    adapter = MacOSAdapter()
+    # 直接呼叫 native reader：若 ctypes bridge 壞掉，不能被 public fallback
+    # 偽裝成「沒有裝置」而 skip。
+    default_id, active = adapter._query_coreaudio()
+    if default_id is None:
         pytest.skip("Core Audio did not expose a default output endpoint")
 
+    default = next(item for item in active if item.id == default_id)
+    snapshot = adapter.query_endpoints()
+    assert snapshot.default is not None
     assert any(snapshot.default is item for item in snapshot.active)
+    assert default.id == default_id
     assert snapshot.default.id
     assert snapshot.default.friendly_name
     for endpoint in snapshot.active:

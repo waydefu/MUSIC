@@ -126,6 +126,24 @@ macOS 的 zsh／bash 可改為：
 QT_QPA_PLATFORM=offscreen uv run aurora --validate-qml
 ```
 
+#### macOS：`.venv` 被標示為隱藏時
+
+若倉庫位於 iCloud 同步的「桌面」或「文件」資料夾，macOS 可能替 `.venv`
+內的 editable `.pth` 檔加上 hidden flag；Python 會略過該檔，導致
+`uv run aurora` 找不到 `aurora`。只在遇到這個錯誤時，改用非點開頭的環境名稱：
+
+```sh
+export UV_PROJECT_ENVIRONMENT=venv
+uv sync --dev
+uv run aurora
+```
+
+離屏驗證則為：
+
+```sh
+QT_QPA_PLATFORM=offscreen UV_PROJECT_ENVIRONMENT=venv uv run aurora --validate-qml
+```
+
 ## 建置 Windows EXE
 
 ```powershell
@@ -150,6 +168,12 @@ uv run mypy
 uv run pytest
 $env:QT_QPA_PLATFORM = "offscreen"
 uv run aurora --validate-qml
+```
+
+macOS 的 mypy 要排除 Windows 專屬模組；以這行取代上面的 `uv run mypy`：
+
+```sh
+uv run mypy --exclude 'platform_win' --follow-imports=silent
 ```
 
 目前品質基準：
