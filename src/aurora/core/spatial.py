@@ -119,6 +119,22 @@ class SpatialUpmix:
         self._decorrelator[0] = 1.0  # DC 不去相關，否則會產生直流偏移
         self._decorrelator[-1] = 1.0
 
+        # binaural 的環繞饋給。P1 折回立體聲時 SL/SR 是 ±u（完全反相），在
+        # 立體聲下那只是加寬；但反相的一對在 M/S 推導裡「和」恆為 0，經過 HRTF
+        # 之後只剩純反相的 side，實測耳間相關性掉到 −0.45 —— 聽起來是「在頭裡面」，
+        # 正好是頭外化的反面。真實的 5.1 環繞是兩條互不相關的訊號，所以這裡給
+        # 兩組獨立的隨機相位，並預先算好和／差，回呼上只花兩次複數乘法。
+        #
+        # 種子與上面的去相關器不同，否則兩者相位一致，等於沒有第二條訊號。
+        surround_rng = np.random.default_rng(20260823)
+        first = np.exp(1j * surround_rng.uniform(-np.pi, np.pi, bins))
+        second = np.exp(1j * surround_rng.uniform(-np.pi, np.pi, bins))
+        for fixed in (first, second):
+            fixed[0] = 1.0     # DC 不去相關，否則會產生直流偏移
+            fixed[-1] = 1.0
+        self._surround_feed_sum = (first + second) * 0.5
+        self._surround_feed_diff = (first - second) * 0.5
+
         self._lf_guard = np.ones(bins)
         # 全部預先配置。先前這三個用 np.concatenate 每個 hop 增長一次 ——
         # 那違反 dsp_graph 契約的規則 2（不得有可避免的穩態配置），而且
@@ -489,7 +505,7 @@ class SpatialUpmix:
 
         場景與 :meth:`_render_stereo` 完全相同，差別只在虛擬喇叭不再是直接
         折回左右聲道，而是各自經過該方位角的 HRTF。因為場景是 M/S 表示，
-        整段可以留在 M/S 域，只要四條濾波器 —— 推導寫在 ``core/hrtf.py``
+        整段可以留在 M/S 域，只要五條濾波器 —— 推導寫在 ``core/hrtf.py``
         的模組 docstring，並由 ``tests/test_hrtf.py`` 對逐喇叭參考實作驗證。
 
         **與 stereo renderer 的一個刻意差異**：這裡的 side 也跟乾訊號做
@@ -502,9 +518,18 @@ class SpatialUpmix:
         amount = self._amount
         gain, width, depth = self._wet_coefficients()
 
-        wet_mid = centre * depth * hrtf.centre + front_mid * hrtf.front_sum
+        # 兩對喇叭走同一條規則：餵法的和進 mid、差進 side。環繞餵的是兩條
+        # 去相關訊號（見 __init__ 的說明），所以它**也**有 mid 成分 ——
+        # 那是不讓音場塌成純反相的關鍵。
+        surround = surround_side * gain
+        wet_mid = (
+            centre * depth * hrtf.centre
+            + front_mid * hrtf.front_sum
+            + surround * self._surround_feed_sum * hrtf.surround_sum
+        )
         wet_side = (
-            dry_side * width * hrtf.front_diff + surround_side * gain * hrtf.surround_diff
+            dry_side * width * hrtf.front_diff
+            + surround * self._surround_feed_diff * hrtf.surround_diff
         )
 
         out_mid = dry_mid * (1.0 - amount) + wet_mid * amount
