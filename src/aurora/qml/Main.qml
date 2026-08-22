@@ -301,8 +301,9 @@ Window {
                     accent2: window.accent2
                     bloomEnabled: motion.bloomEnabled
                     bloomStrength: motion.bloomStrength
-                    opacity: window.lyricsOpen || window.playlistOpen || window.libraryOpen || window.qualityOpen || window.settingsOpen
-                             ? 0.25 : 1.0
+                    // 用衍生屬性而不是逐一列舉。原本的寫法漏掉新面板時，
+                    // 頻譜就會直接打穿面板打在文字上 —— 加音效面板時真的發生過。
+                    opacity: window.anyPanelOpen ? 0.25 : 1.0
                     Behavior on opacity { NumberAnimation { duration: Motion.panel } }
                 }
 
@@ -760,6 +761,7 @@ Window {
     readonly property bool libraryOpen: openPanel === "library"
     readonly property bool lyricsOpen: openPanel === "lyrics"
     readonly property bool qualityOpen: openPanel === "quality"
+    readonly property bool anyPanelOpen: openPanel !== ""
     readonly property bool effectsOpen: openPanel === "effects"
     readonly property bool settingsOpen: openPanel === "settings"
 
