@@ -50,8 +50,49 @@ from aurora.platform.base import NullAdapter
 
 
 class MacOSAdapter(NullAdapter):
-    """macOS 平台能力。目前全部沿用降級行為，逐一覆寫中。"""
+    """macOS 平台能力。目前其餘能力仍沿用降級行為，逐一覆寫中。"""
 
     @property
     def name(self) -> str:
         return "macOS"
+
+    def system_animations_enabled(self) -> bool:
+        """依 macOS 的 Reduce Motion 偏好決定是否保留位移動效。
+
+        原生 API 的語意剛好相反；查詢失敗時沿用 ``NullAdapter`` 的預設，
+        讓無障礙偏好查詢本身絕不阻斷播放器啟動。
+        """
+        try:
+            return not self._read_reduce_motion()
+        except Exception:
+            return True
+
+    def _read_reduce_motion(self) -> bool:
+        """以 Objective-C runtime 讀取 ``NSWorkspace`` 的 Reduce Motion 設定。
+
+        不使用 PyObjC，避免新增依賴與打包時的 hidden-import 風險。這些原生
+        載入刻意留在方法內，讓本模組仍可在 Windows 的契約測試中 import。
+        """
+        import ctypes
+
+        ctypes.CDLL("/System/Library/Frameworks/AppKit.framework/AppKit")
+        objc = ctypes.CDLL("/usr/lib/libobjc.A.dylib")
+        objc.objc_getClass.argtypes = [ctypes.c_char_p]
+        objc.objc_getClass.restype = ctypes.c_void_p
+        objc.sel_registerName.argtypes = [ctypes.c_char_p]
+        objc.sel_registerName.restype = ctypes.c_void_p
+        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+
+        workspace_class = objc.objc_getClass(b"NSWorkspace")
+        shared_workspace = objc.sel_registerName(b"sharedWorkspace")
+        reduce_motion = objc.sel_registerName(b"accessibilityDisplayShouldReduceMotion")
+        if not workspace_class or not shared_workspace or not reduce_motion:
+            raise RuntimeError("NSWorkspace Objective-C runtime symbols are unavailable")
+
+        objc.objc_msgSend.restype = ctypes.c_void_p
+        workspace = objc.objc_msgSend(workspace_class, shared_workspace)
+        if not workspace:
+            raise RuntimeError("NSWorkspace.sharedWorkspace returned nil")
+
+        objc.objc_msgSend.restype = ctypes.c_bool
+        return bool(objc.objc_msgSend(workspace, reduce_motion))
