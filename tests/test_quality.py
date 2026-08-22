@@ -41,6 +41,18 @@ def _mp3() -> Track:
     )
 
 
+def _mp3_48k() -> Track:
+    """截圖回報的那一首：48 kHz 的 320 kbps MP3。"""
+    return Track(
+        path=r"D:\music\song.mp3",
+        title="測試曲",
+        fmt=AudioFormat(48000, 2, 16),
+        codec="mp3",
+        lossless=False,
+        bitrate_kbps=320,
+    )
+
+
 def _endpoint(
     transport: TransportKind, sample_rate: int = 48000, channels: int = 2
 ) -> EndpointInfo:
@@ -158,6 +170,49 @@ def test_hfp_also_connected_warns_even_while_on_a2dp() -> None:
         hfp_also_connected=True,
     )
     assert any("Hands-Free" in warning for warning in report.warnings)
+
+
+def test_resample_warning_names_the_engine_not_the_endpoint() -> None:
+    """比的是來源與引擎，文案就得說引擎。"""
+    report = build_report(
+        track=_flac(),
+        engine_format=ENGINE_48K,
+        endpoint=_endpoint(TransportKind.WIRED),
+        codec=PCM_CODEC,
+        rolloff=NO_DATA,
+    )
+    assert any("與引擎 48000 Hz 不一致" in warning for warning in report.warnings)
+    assert not any("與輸出端點 48000 Hz 不一致" in warning for warning in report.warnings)
+
+
+def test_engine_stuck_below_the_endpoint_is_reported_as_its_own_fault() -> None:
+    """回報截圖的狀態：來源 48k、引擎卡在 24k、端點自己已經回到 48k。
+
+    三個值各自不同，警告就要分成兩段講。舊文案把引擎的取樣率說成端點的，
+    於是警告寫「輸出端點 24000 Hz」而端點那一列寫 48 kHz，自相矛盾，
+    看的人會去查錯的一層。
+    """
+    report = build_report(
+        track=_mp3_48k(),
+        engine_format=AudioFormat(24000, 2, 32, is_float=True),
+        endpoint=_endpoint(TransportKind.BLUETOOTH_A2DP, sample_rate=48000),
+        codec=AAC_CODEC,
+        rolloff=NO_DATA,
+    )
+    assert any("來源 48000 Hz 與引擎 24000 Hz" in warning for warning in report.warnings)
+    assert any("引擎 24000 Hz 與輸出端點 48000 Hz" in warning for warning in report.warnings)
+    assert not any("輸出端點 24000" in warning for warning in report.warnings)
+
+
+def test_engine_matching_the_endpoint_stays_quiet() -> None:
+    report = build_report(
+        track=_mp3_48k(),
+        engine_format=ENGINE_48K,
+        endpoint=_endpoint(TransportKind.BLUETOOTH_A2DP, sample_rate=48000),
+        codec=AAC_CODEC,
+        rolloff=NO_DATA,
+    )
+    assert not any("與輸出端點" in warning for warning in report.warnings)
 
 
 def test_fake_lossless_warning_quotes_the_measured_cutoff() -> None:
@@ -297,6 +352,33 @@ def test_measurement_stage_reports_cutoff_once_available() -> None:
     )
     measurement = next(stage for stage in report.stages if stage.label == "量測")
     assert "20.8 kHz" in measurement.detail
+    assert measurement.confidence is Confidence.MEASURED
     assert not measurement.warn
     # 20.8 kHz 在無損容器裡是完全正常的收斂，不該被當成轉檔而扣分
     assert report.stars == 5
+
+
+def test_measurement_stops_estimating_when_the_engine_limits_it() -> None:
+    """引擎卡在 24 kHz 時，量到的 12 kHz 是分析鏈的天花板，不是這首歌的品質。
+
+    這一段是取樣率 bug 的第二層傷害：面板會拿它去指控一首 320 kbps 的 MP3
+    「96 kbps 以下」，無損檔案還會被扣一顆星說是轉檔的。
+    """
+    rolloff = classify_rolloff(
+        12000.0,
+        lossless_container=False,
+        source_sample_rate=48000,
+        analysis_sample_rate=24000,
+    )
+    report = build_report(
+        track=_mp3_48k(),
+        engine_format=AudioFormat(24000, 2, 32, is_float=True),
+        endpoint=_endpoint(TransportKind.BLUETOOTH_A2DP, sample_rate=48000),
+        codec=AAC_CODEC,
+        rolloff=rolloff,
+    )
+    measurement = next(stage for stage in report.stages if stage.label == "量測")
+    assert measurement.confidence is Confidence.UNKNOWN
+    assert "12.0 kHz" in measurement.detail
+    assert "kbps" not in measurement.detail
+    assert not any("轉檔" in warning for warning in report.warnings)

@@ -190,6 +190,9 @@ class RolloffResult:
     estimated_kbps: int | None = None
     #: 容器宣稱無損但量測結果不像 ⇒ 疑似轉檔。
     suspected_transcode: bool = False
+    #: 引擎取樣率低於來源，量到的截止只是分析鏈自己的 Nyquist ⇒ 這次量測
+    #: 不能拿來推估來源品質，也不能拿來指控轉檔。
+    analysis_limited: bool = False
 
 
 @dataclass(frozen=True, slots=True)
