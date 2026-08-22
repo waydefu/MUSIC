@@ -23,6 +23,25 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
+#: 掃描 Markdown 時要跳過的目錄：版控、虛擬環境、建置產物與工具快取。
+#:
+#: 工具快取那三個不是為了效能，是為了讓綠燈的意義穩定 —— ``.pytest_cache/``
+#: 裡有一個 ``README.md``，不排除的話「收集到幾個測試」會取決於 pytest
+#: 之前跑過沒有（本機 24 個、乾淨的 CI runner 22 個）。數量會飄的測試套件
+#: 會讓人分不清「新文件沒被收進去」和「快取還沒建立」。
+#: ``.mypy_cache/`` 與 ``.ruff_cache/`` 目前不含 Markdown，一併列上是因為
+#: 它們同屬一類，將來多出一個 README 不該讓這個坑重演。
+_SKIPPED_DIRS = (
+    ".git/",
+    ".venv/",
+    "dist/",
+    "build/",
+    "node_modules/",
+    ".pytest_cache/",
+    ".mypy_cache/",
+    ".ruff_cache/",
+)
+
 #: 只有這些前綴會被當成「倉庫內的路徑」。其餘（Windows 路徑、打包後的
 #: ``_internal/``、外部網址）都不是這個測試該管的。
 _REPO_PREFIXES = ("src/", "tests/", "tools/", "packaging/", "data/", ".claude/")
@@ -52,7 +71,7 @@ def markdown_files() -> list[Path]:
     found = []
     for path in ROOT.rglob("*.md"):
         relative = path.relative_to(ROOT).as_posix()
-        if relative.startswith((".git/", ".venv/", "dist/", "build/", "node_modules/")):
+        if relative.startswith(_SKIPPED_DIRS):
             continue
         found.append(path)
     return sorted(found)
