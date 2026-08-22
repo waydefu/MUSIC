@@ -161,6 +161,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     if options.validate_qml:
         app.processEvents()
+        # 印出實際選到的 platform adapter。這一行是給打包驗證用的：
+        # adapter() 在找不到平台實作時會**安靜地**退回 NullAdapter，
+        # 播放器照樣啟動、QML 照樣載入、exit code 照樣是 0 —— 只有音質
+        # 面板變成一片「未知」。tools/build_exe.py 會比對這行輸出，
+        # 否則 hiddenimports 漏掉 aurora.platform.windows 這種事
+        # 在打包驗證裡完全看不出來。
+        print(f"platform adapter: {adapter().name}")
         return 0
 
     _restore_window_geometry(config, engine)

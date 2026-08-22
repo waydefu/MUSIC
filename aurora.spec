@@ -149,11 +149,17 @@ a = Analysis(  # noqa: F821
         (str(ROOT / "data"), "data"),
         (str(ROOT / "src" / "aurora" / "qml"), "aurora/qml"),
     ],
-    # aurora.platform._select() 是在函式內才 import 平台實作的（因為
-    # platform_win 在模組層級就 import winreg，放模組層級會讓 macOS 炸），
-    # 所以 PyInstaller 的靜態分析看不到它。不明列的話打包版會找不到
-    # WindowsAdapter 而**靜默**退化成 NullAdapter —— 音質面板變成一片
-    # 「未知」，卻不會有任何錯誤訊息。
+    # aurora.platform.windows 是保險，不是必需。
+    #
+    # _select() 在函式內才 import 平台實作（因為 platform_win 於模組層級就
+    # import winreg，放模組層級會讓 macOS 連 import 都過不了）。實測
+    # PyInstaller 的 modulegraph **看得到**函式內的 import —— 證據是沒有列
+    # 進來的 aurora.platform.macos 一樣被收進 bundle 了。
+    #
+    # 之所以還是明列，是因為這條路徑的失敗模式是靜默的：漏掉的話 adapter()
+    # 會安靜地退回 NullAdapter，程式照常啟動、QML 照常載入、exit code 照樣
+    # 是 0，只有音質面板變成一片「未知」。真正的守門是 build_exe.py 的
+    # _verify_platform_adapter()，這裡只是多一層便宜的保險。
     hiddenimports=["_cffi_backend", "aurora.platform.windows"],
     hookspath=[],
     hooksconfig={},
