@@ -915,6 +915,7 @@ Window {
     Shortcut { sequence: "Ctrl+O"; onActivated: libraryFolderDialog.open() }
     Shortcut { sequence: "P"; onActivated: window.togglePanel("playlist") }
     Shortcut { sequence: "I"; onActivated: window.togglePanel("quality") }
+    Shortcut { sequence: "E"; onActivated: window.togglePanel("effects") }
     Shortcut { sequence: "Ctrl+,"; onActivated: window.togglePanel("settings") }
     Shortcut { sequence: "C"; onActivated: window.cinema = !window.cinema }
     Shortcut { sequence: "F11"; onActivated: window.toggleFullscreen() }
