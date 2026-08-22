@@ -100,7 +100,10 @@ def _measurement_stage(rolloff: RolloffResult, levels: LevelStats | None) -> Cha
     detail = f"頻譜截止 {(rolloff.cutoff_hz or 0) / 1000:.1f} kHz → {rolloff.label}"
     if levels is not None and levels.clipped_runs:
         detail += f" · 削波 {levels.clipped_runs} 處"
-    return ChainStage("量測", detail, warn=rolloff.suspected_transcode)
+    # 截止值本身是實測的，但引擎取樣率壓在來源之下時，「來源有多好」這個
+    # 結論並不是量出來的 —— 不能掛 ✓實測 讓它冒充事實。
+    confidence = Confidence.UNKNOWN if rolloff.analysis_limited else Confidence.MEASURED
+    return ChainStage("量測", detail, confidence, warn=rolloff.suspected_transcode)
 
 
 def _collect_warnings(
@@ -124,10 +127,24 @@ def _collect_warnings(
             "若音質突然變差，多半是被某個程式搶去當通話裝置了。"
         )
 
+    # 這裡比的是「來源 vs 引擎」，文案就必須說引擎。以前寫成「輸出端點」，
+    # 結果引擎卡在過渡取樣率時，警告會跟下面的端點那一段自相矛盾
+    # （警告說端點 24 kHz，端點那一列卻寫 48 kHz），把人指向錯的一層。
     if source is not None and engine is not None and source.sample_rate != engine.sample_rate:
         warnings.append(
-            f"來源 {source.sample_rate} Hz 與輸出端點 {engine.sample_rate} Hz 不一致，"
+            f"來源 {source.sample_rate} Hz 與引擎 {engine.sample_rate} Hz 不一致，"
             "訊號經過一次重取樣。"
+        )
+
+    endpoint_format = endpoint.effective_format if endpoint is not None else None
+    if (
+        engine is not None
+        and endpoint_format is not None
+        and engine.sample_rate != endpoint_format.sample_rate
+    ):
+        warnings.append(
+            f"引擎 {engine.sample_rate} Hz 與輸出端點 {endpoint_format.sample_rate} Hz 不一致，"
+            "系統會再重取樣一次。端點格式剛換過的話，下一輪輪詢就會對齊。"
         )
 
     if rolloff.suspected_transcode:

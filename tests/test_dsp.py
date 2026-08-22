@@ -171,6 +171,91 @@ def test_low_sample_rate_source_is_not_flagged() -> None:
     assert not result.suspected_transcode
 
 
+# --------------------------------------------------- 分析鏈自己造成的截止
+
+
+def test_engine_downsampling_makes_the_measurement_inconclusive() -> None:
+    """引擎被切到 24 kHz 時，12 kHz 的截止是分析鏈的天花板，不是來源的品質。
+
+    回報過的誤診就是這一條：端點短暫報 24 kHz、引擎跟著切下去，一首 48 kHz
+    的 320 kbps MP3 就被面板標成「96 kbps 以下」。
+    """
+    result = classify_rolloff(
+        12000.0,
+        lossless_container=False,
+        source_sample_rate=48000,
+        analysis_sample_rate=24000,
+    )
+    assert result.analysis_limited
+    assert result.estimated_kbps is None
+    assert "無法推估" in result.label
+
+
+def test_genuine_lossless_is_not_accused_when_the_engine_downsamples() -> None:
+    """誤報比漏報傷害大：引擎壓著量測時，不能反過來指控來源是轉檔。"""
+    result = classify_rolloff(
+        11900.0,
+        lossless_container=True,
+        source_sample_rate=96000,
+        analysis_sample_rate=24000,
+    )
+    assert result.analysis_limited
+    assert not result.suspected_transcode
+
+
+def test_content_well_below_the_analysis_ceiling_is_still_judged() -> None:
+    """截止離分析鏈的 Nyquist 還很遠時，量到的就是內容本身，照常下結論。"""
+    result = classify_rolloff(
+        6000.0,
+        lossless_container=False,
+        source_sample_rate=48000,
+        analysis_sample_rate=24000,
+    )
+    assert not result.analysis_limited
+    assert result.estimated_kbps == 96
+
+
+def test_hi_res_source_on_a_48k_engine_is_still_called_lossless() -> None:
+    """天花板落在最高級距之上時，結論仍然成立，不該退回「無法判定」。
+
+    96 kHz 的檔案跑在 48 kHz 端點上，量到的 24 kHz 是下界 —— 而「至少到
+    24 kHz」本來就足以支持「無損／透明」。這一條防的是防呆本身矯枉過正。
+    """
+    result = classify_rolloff(
+        23900.0,
+        lossless_container=True,
+        source_sample_rate=96000,
+        analysis_sample_rate=48000,
+    )
+    assert not result.analysis_limited
+    assert result.label == "無損／透明"
+    assert not result.suspected_transcode
+
+
+def test_analysis_rate_at_or_above_source_changes_nothing() -> None:
+    """引擎沒有壓低取樣率時，這道防呆不得影響任何既有判定。"""
+    guarded = classify_rolloff(
+        16000.0,
+        lossless_container=True,
+        source_sample_rate=44100,
+        analysis_sample_rate=48000,
+    )
+    assert guarded == classify_rolloff(
+        16000.0, lossless_container=True, source_sample_rate=44100
+    )
+    assert guarded.suspected_transcode
+
+
+def test_analyzer_reports_its_own_ceiling_not_the_source_quality() -> None:
+    """跑在 24 kHz 的分析器要自己知道它量不到 12 kHz 以上。"""
+    analyzer = RolloffAnalyzer(24000)
+    analyzer.feed(_lowpassed_noise(SAMPLE_RATE / 2))
+    result = analyzer.result(lossless_container=True, source_sample_rate=48000)
+    assert result.enough_data
+    assert result.analysis_limited
+    assert not result.suspected_transcode
+
+
 # ------------------------------------------------------------------ 響度與削波
 
 

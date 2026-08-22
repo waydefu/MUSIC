@@ -23,7 +23,9 @@ from aurora.core.constants import (
     PEAK_GRAVITY,
     PEAK_HOLD_SEC,
     ROLLING_MAX_DECAY,
+    ROLLOFF_ANALYSIS_LIMIT_RATIO,
     ROLLOFF_FLOOR_DB,
+    ROLLOFF_LIMITED_LABEL,
     ROLLOFF_MIN_FRAMES,
     ROLLOFF_TIERS,
     SPECTRUM_BARS,
@@ -245,7 +247,23 @@ class RolloffAnalyzer:
             cutoff,
             lossless_container=lossless_container,
             source_sample_rate=source_sample_rate or self._sample_rate,
+            # 分析器跑在引擎的取樣率上，不是檔案的。兩者不同時這件事決定了
+            # 量測結果能不能拿來下結論，所以一定要往下傳。
+            analysis_sample_rate=self._sample_rate,
         )
+
+
+def _analysis_ceiling_reached(
+    cutoff_hz: float, source_sample_rate: int, analysis_sample_rate: int
+) -> bool:
+    """量到的截止是不是分析鏈自己的天花板，而不是內容的收斂。
+
+    只有引擎取樣率低於來源時才可能發生：高頻在重取樣那一步就沒了，
+    分析器再怎麼量都只會量到自己的 Nyquist 附近。
+    """
+    if analysis_sample_rate <= 0 or analysis_sample_rate >= source_sample_rate:
+        return False
+    return cutoff_hz >= analysis_sample_rate / 2.0 * ROLLOFF_ANALYSIS_LIMIT_RATIO
 
 
 def classify_rolloff(
@@ -253,8 +271,33 @@ def classify_rolloff(
     *,
     lossless_container: bool,
     source_sample_rate: int,
+    analysis_sample_rate: int | None = None,
 ) -> RolloffResult:
-    """把截止頻率對照成品質級距，並判斷是否為假無損。"""
+    """把截止頻率對照成品質級距，並判斷是否為假無損。
+
+    ``analysis_sample_rate`` 是**量測當下**的取樣率（引擎的，不是檔案的）。
+    引擎被對齊到比來源低的端點時，高頻在進分析器之前就被重取樣濾掉了，
+    這時拿量到的截止去查表會得到「12 kHz ⇒ 96 kbps 以下」這種完全錯誤的
+    結論，甚至反過來指控一個真無損檔案是轉檔的。回報過的案例：端點短暫報出
+    24 kHz、引擎跟著切下去，一首 320 kbps 的 MP3 就被標成「96 kbps 以下」。
+    不傳這個參數時行為與以前完全相同。
+    """
+    # 撞到天花板時，量到的截止是**下界**而不是實際值：真正的截止只會更高。
+    # 下界本身就落在最高級距時（例：96 kHz 來源跑在 48 kHz 引擎上，天花板
+    # 24 kHz），「至少到 20.5 kHz」這個結論仍然成立，照常判定；只有下界落在
+    # 較低級距時，查表才會把分析鏈的限制誤讀成「來源只有這麼好」。
+    if (
+        analysis_sample_rate is not None
+        and cutoff_hz < ROLLOFF_TIERS[0][0]
+        and _analysis_ceiling_reached(cutoff_hz, source_sample_rate, analysis_sample_rate)
+    ):
+        return RolloffResult(
+            enough_data=True,
+            cutoff_hz=cutoff_hz,
+            label=ROLLOFF_LIMITED_LABEL,
+            analysis_limited=True,
+        )
+
     label = ROLLOFF_TIERS[-1][1]
     estimated: int | None = ROLLOFF_TIERS[-1][2]
     for threshold, tier_label, kbps in ROLLOFF_TIERS:
