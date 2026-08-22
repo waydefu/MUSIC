@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import time
+import unicodedata
 from pathlib import Path
 
 import pytest
 
 from aurora.bridge.metadata_loader import MetadataLoader
 from aurora.core.lrc import parse_lrc
+from aurora.core.models import Track
 from aurora.library.metadata import read_lyrics_text, read_track, read_track_stub
 from aurora.library.scanner import group_audio_files, iter_audio_files, scan
-from aurora.library.store import LibraryCache
+from aurora.library.store import LibraryCache, _cache_key
 
 # ------------------------------------------------------------------ 標籤
 
@@ -199,11 +202,35 @@ def test_cache_round_trip(tmp_path: Path, generated_dir: Path) -> None:
     assert track is not None
     cache.put(track)
     assert cache.save(target)
+    assert json.loads(target.read_text(encoding="utf-8"))["version"] == 2
 
     reloaded = LibraryCache()
     assert reloaded.load(target)
     assert len(reloaded) == 1
     assert reloaded.tracks[0] == track
+
+
+def test_cache_schema_v2_round_trip(tmp_path: Path) -> None:
+    """新版快取可獨立於音訊測試素材完成寫入與還原。"""
+    source = tmp_path / "Beyonc\N{LATIN SMALL LETTER E WITH ACUTE}.flac"
+    source.write_bytes(b"cached metadata")
+    stat = source.stat()
+    track = Track(
+        path=str(source),
+        title="Beyonc\N{LATIN SMALL LETTER E WITH ACUTE}",
+        mtime=stat.st_mtime,
+        size=stat.st_size,
+    )
+    target = tmp_path / "library.json"
+
+    cache = LibraryCache()
+    cache.put(track)
+    assert cache.save(target)
+    assert json.loads(target.read_text(encoding="utf-8"))["version"] == 2
+
+    reloaded = LibraryCache()
+    assert reloaded.load(target)
+    assert reloaded.get(source) == track
 
 
 def test_cache_hit_avoids_rereading(tmp_path: Path, generated_dir: Path) -> None:
@@ -242,6 +269,21 @@ def test_cache_from_a_different_schema_version_is_discarded(tmp_path: Path) -> N
     target = tmp_path / "library.json"
     target.write_text('{"version": 999, "tracks": {}}', encoding="utf-8")
     assert not LibraryCache().load(target)
+
+
+def test_cache_from_schema_v1_is_discarded_after_path_key_normalization(tmp_path: Path) -> None:
+    """v1 的 NFD 路徑鍵可能和 Windows 的 NFC 鍵不同，必須整份安全淘汰。"""
+    target = tmp_path / "library.json"
+    target.write_text('{"version": 1, "tracks": {}}', encoding="utf-8")
+    assert not LibraryCache().load(target)
+
+
+def test_cache_key_treats_nfc_and_nfd_paths_as_the_same_path() -> None:
+    """APFS 的 NFD 路徑不能讓跨平台共用快取無故失效。"""
+    nfc_path = Path("/Music/Beyonc\N{LATIN SMALL LETTER E WITH ACUTE}.flac")
+    nfd_path = Path(unicodedata.normalize("NFD", str(nfc_path)))
+
+    assert _cache_key(nfc_path, 1234.5, 678) == _cache_key(nfd_path, 1234.5, 678)
 
 
 def test_prune_removes_vanished_files(tmp_path: Path, generated_dir: Path) -> None:

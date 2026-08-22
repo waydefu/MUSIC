@@ -51,9 +51,17 @@ def qml_root() -> Path:
 
 
 def app_data_dir() -> Path:
-    """``%APPDATA%\\Aurora``。呼叫時確保目錄存在。"""
-    base = os.environ.get("APPDATA")
-    root = Path(base) if base else Path.home() / "AppData" / "Roaming"
+    """使用者資料目錄。呼叫時確保目錄存在。
+
+    Windows 沿用 ``%APPDATA%\\Aurora``；macOS 則遵循平台慣例，放在
+    ``~/Library/Application Support/Aurora``。其餘平台保留既有的 Windows
+    相容 fallback，避免未支援的平台因為設定路徑而無法啟動。
+    """
+    if sys.platform == "darwin":
+        root = Path.home() / "Library" / "Application Support"
+    else:
+        base = os.environ.get("APPDATA")
+        root = Path(base) if base else Path.home() / "AppData" / "Roaming"
     directory = root / APP_NAME
     directory.mkdir(parents=True, exist_ok=True)
     return directory
