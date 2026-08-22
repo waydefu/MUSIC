@@ -26,6 +26,19 @@
 需要先規劃再動手的情況：跨層變更（QML＋bridge＋core）、動到執行緒邊界或載入時序、
 改動打包／發行流程。單檔的邏輯修正直接做。
 
+**開新工作之前先比對 main。** worktree 的基底可能已經落後很多，而 session 開場
+載入到 context 裡的 CLAUDE.md／AGENTS.md 是**那個舊基底**的版本 —— 它們會非常
+有說服力地描述一個已經不存在的現況。實際踩過兩次：照舊文件認定某個機制「還沒做」
+而開始重造一個 main 上早就有的東西；以及照舊 AGENTS.md 宣稱「這個倉庫沒有 CI」，
+而 CI 當時已經在跑 Windows 與 macOS 兩個 job。成本是幾秒鐘：
+
+```powershell
+git fetch origin; git log --oneline HEAD..origin/main
+```
+
+有落後就先弄清楚落後的是什麼再動手。這條只針對**開新工作**；手上已經在做的
+單檔修正不必每次都查。
+
 ## 驗證與宣稱
 
 依 AGENTS.md 的驗證矩陣挑 gate，並遵守它的證據等級標籤。額外規則：
