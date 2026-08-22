@@ -218,8 +218,50 @@ def _measure_pressure(engine: TimedEngine, frames: int, rounds: int) -> Pressure
     )
 
 
-def run_offline(source: Path, sample_rate: int, target: int, frames: int) -> int:
+def install_chain(engine: AudioEngine, chain: str) -> None:
+    """把要量測的 DSP 級聯掛上去。
+
+    ``eq`` 刻意用**最大增益**：十段全開 +12 dB 是使用者做得到的最壞情況，
+    量最壞情況才有意義。核心長度與 FFT 成本跟增益值無關，但「全平時直接
+    跳過」的最佳化會讓平坦設定量不到東西。
+    """
+    if chain == "none":
+        return
+    if chain == "eq":
+        from aurora.core.constants import EQ_BAND_HZ, EQ_GAIN_LIMIT_DB
+        from aurora.core.dynamics import Limiter, OutputMeter
+        from aurora.core.eq import GraphicEqualizer
+
+        equalizer = GraphicEqualizer()
+        engine.graph.set_stages((equalizer, Limiter(), OutputMeter()))
+        equalizer.set_gains([EQ_GAIN_LIMIT_DB] * len(EQ_BAND_HZ))
+        return
+    if chain == "spatial":
+        from aurora.core.dynamics import Limiter, OutputMeter
+        from aurora.core.spatial import SpatialUpmix
+
+        upmix = SpatialUpmix()
+        engine.graph.set_stages((upmix, Limiter(), OutputMeter()))
+        upmix.amount = 1.0
+        return
+    if chain == "full":
+        from aurora.core.constants import EQ_BAND_HZ, EQ_GAIN_LIMIT_DB
+        from aurora.core.dynamics import Limiter, OutputMeter
+        from aurora.core.eq import GraphicEqualizer
+        from aurora.core.spatial import SpatialUpmix
+
+        equalizer = GraphicEqualizer()
+        upmix = SpatialUpmix()
+        engine.graph.set_stages((equalizer, upmix, Limiter(), OutputMeter()))
+        equalizer.set_gains([EQ_GAIN_LIMIT_DB] * len(EQ_BAND_HZ))
+        upmix.amount = 1.0
+        return
+    raise ValueError(f"未知的 chain：{chain}")
+
+
+def run_offline(source: Path, sample_rate: int, target: int, frames: int, chain: str) -> int:
     engine = TimedEngine(sample_rate, capacity=target + WARMUP_CALLBACKS + 16)
+    install_chain(engine, chain)
     if not engine.load(str(source)):
         print(f"載入失敗：{source}", file=sys.stderr)
         return 2
@@ -248,13 +290,14 @@ def run_offline(source: Path, sample_rate: int, target: int, frames: int) -> int
     )
 
 
-def run_device(source: Path, sample_rate: int, target: int, muted: bool) -> int:
+def run_device(source: Path, sample_rate: int, target: int, muted: bool, chain: str) -> int:
     """真實裝置 + Qt 事件迴圈 + 60 Hz 分析器 tick。"""
     from PySide6.QtCore import QCoreApplication, QTimer
 
     app = QCoreApplication(sys.argv[:1])
     engine = TimedEngine(sample_rate, capacity=target + WARMUP_CALLBACKS + 4096)
     engine.muted = muted
+    install_chain(engine, chain)
 
     if not engine.load(str(source)):
         print(f"載入失敗：{source}", file=sys.stderr)
@@ -339,6 +382,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="device 模式實際出聲。預設靜音，靜音不影響量測代表性。",
     )
+    parser.add_argument(
+        "--chain",
+        choices=("none", "eq", "spatial", "full"),
+        default="none",
+        help=(
+            "要掛上去量的 DSP 級聯。eq = 十段全開 +12 dB；spatial = upmix 全開；"
+            "full = 兩者疊加。全部再加限幅器與輸出電表。"
+        ),
+    )
     parser.set_defaults(mode="offline")
     options = parser.parse_args(argv)
 
@@ -348,8 +400,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if options.mode == "device":
-        return run_device(options.file, options.rate, options.callbacks, not options.unmuted)
-    return run_offline(options.file, options.rate, options.callbacks, options.frames)
+        return run_device(
+            options.file, options.rate, options.callbacks, not options.unmuted, options.chain
+        )
+    return run_offline(
+        options.file, options.rate, options.callbacks, options.frames, options.chain
+    )
 
 
 if __name__ == "__main__":
