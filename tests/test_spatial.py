@@ -163,6 +163,29 @@ def test_diffuse_content_gets_wider() -> None:
     assert after_side > before_side
 
 
+def test_realistic_material_is_meaningfully_widened() -> None:
+    """**真實混音**（置中人聲 + 不相關殘響）要有可聽的展開。
+
+    這條是補測試盲點補出來的。原本只有 :func:`test_diffuse_content_gets_wider`，
+    用的是完全不相關的素材 —— 那種情況剛好繞過了問題，所以它一路是綠的，
+    而真實音樂上效果幾乎是零。
+
+    當時環繞路徑被乘了兩次閘門（``side × (1 − centre_weight)``），而 side
+    本身就已經是不相關的成分。真實素材大多相關，閘門中位數只有 0.19，
+    再加上隨機相位是以功率相加，最後只換到 0.7% 的側能量。
+
+    所以這裡斷言的是**倍率**而不是「有變大」—— 只看方向的斷言抓不到
+    「效果小到聽不出來」這種失敗。
+    """
+    signal = _program()
+    before_l, before_r = _channels_of(signal)
+    after_l, after_r = _channels_of(_run(_make(1.0), signal)[LATENCY * CHANNELS :])
+
+    before_side = _rms((before_l - before_r) * 0.5)
+    after_side = _rms((after_l - after_r) * 0.5)
+    assert after_side / before_side > 1.15
+
+
 def test_bass_survives_mono_collapse() -> None:
     """**低頻不可以相位抵消。**
 

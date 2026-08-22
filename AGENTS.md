@@ -10,8 +10,13 @@ Python 3.11 + PySide6／Qt Quick（QML）介面，miniaudio 播放層，mutagen 
 numpy 做 FFT／音質分析。uv 管相依，PyInstaller `onedir` 打包，PowerShell 腳本安裝。
 授權 GPL-3.0（由 mutagen 與 PySide6 的相依授權決定，不是偏好）。
 
-**沒有 CI，沒有伺服器，沒有網路服務。** 所有驗證都發生在維護者的 Windows 機器上。
-「測試綠燈」不等於「打包後的 EXE 正常」，這個落差是本倉庫最主要的風險來源。
+**沒有伺服器，沒有網路服務。** 有 GitHub Actions CI，兩個 job（Windows 與 macOS）
+都是 required check —— 維護者在 Windows、另一位開發者在 macOS，兩人都無法在本機
+驗證對方的平台，CI 是唯一能防止互相破壞的機制。
+
+但 CI 蓋不到的東西仍然是最主要的風險來源：
+**「CI 綠燈」不等於「打包後的 EXE 正常」，也不等於「畫面是對的」。**
+實機音訊、GUI 外觀、打包驗證、效能的權威數字都不在 CI 裡（原因見下方驗證契約）。
 
 ## 先讀哪一份
 
@@ -69,6 +74,8 @@ numpy 做 FFT／音質分析。uv 管相依，PyInstaller `onedir` 打包，Powe
 ### 可用的 gate
 
 全部從倉庫根目錄執行。PowerShell 是主要 shell。
+**前五條會由 CI 在 Windows 與 macOS 上自動跑**（`.github/workflows/ci.yml`），
+本機只需要在想快速回饋時執行。
 
 ```powershell
 uv run ruff check .                       # lint
@@ -84,7 +91,19 @@ uv run python tools/make_release.py       # 建置 + BOM 檢查 + 壓縮 + SHA25
 素材不存在時相關測試會 **skip 而不是失敗** —— 看到大量 skip 表示你量到的是縮水的套件，
 不要據此宣稱「全部通過」。目前的基準數字見 README 的「品質檢查」。
 
-`-m "not audio"` 可排除會真的開啟音訊裝置的測試（預設會跑）。
+`-m "not audio"` 可排除會真的開啟音訊裝置的測試（預設會跑）。CI 一律加這個旗標 ——
+runner 沒有音訊裝置。
+
+### CI 蓋不到的（要自己在實機做）
+
+| 項目 | 為什麼 |
+|---|---|
+| `-m "audio"` 的測試 | runner 沒有音訊裝置 |
+| `tools/build_exe.py --verify` | 慢，且打包產物的驗證需要另外觸發 |
+| callback 效能的權威數字 | hosted runner 是共用 VM，尾端數字被鄰居噪音污染。實測同機同碼跑五次 offline，p50 穩定但 max 差 28 倍 —— 詳見 PROJECT_PLAN.md §7.5 |
+| GUI 外觀、動效、實際出聲 | 本質需要人。`--validate-qml` 只證明載得起來 |
+
+`tools/bench_callback.py --device` 是效能數字的唯一權威來源，只能在實體機器上跑。
 
 ### 依變更類型選 gate
 
