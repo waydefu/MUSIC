@@ -61,6 +61,7 @@ from aurora.core.constants import (
     SPATIAL_DECORRELATION_HP_HZ,
     SPATIAL_FFT_SIZE,
     SPATIAL_HOP,
+    SPATIAL_PANNING_KNEE,
     SPATIAL_SURROUND_LEVEL,
     SPATIAL_WIDTH,
 )
@@ -291,7 +292,11 @@ class SpatialUpmix:
         total = np.maximum(self._smoothed_m + self._smoothed_s, _EPS)
         coherence = (self._smoothed_m - self._smoothed_s) / total
         panning = np.abs(2.0 * self._smoothed_cross / total)
-        return coherence, np.clip(1.0 - panning, 0.0, 1.0)
+        # 軟膝而不是線性。線性閘門會連「輕微偏位」的內容一起保護，而真實
+        # 混音本來就充滿各種偏位的樂器 —— 實測兩支 Dolby Atmos 測試片，
+        # 線性閘門平均只放行 48–66%，加寬因此幾乎聽不出來。需要保護的
+        # 其實只有硬定位（|Δ|→1）。
+        return coherence, np.clip(1.0 - panning**SPATIAL_PANNING_KNEE, 0.0, 1.0)
 
     def _build_scene(
         self,
