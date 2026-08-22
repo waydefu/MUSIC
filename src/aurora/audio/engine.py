@@ -24,11 +24,13 @@ import numpy.typing as npt
 
 from aurora.audio.analyzer import Analyzer
 from aurora.core.constants import (
+    CALLBACK_FRAMES_HEADROOM,
     FALLBACK_SAMPLE_RATE,
     FRAMES_PER_CHUNK,
     OUTPUT_CHANNELS,
     VOLUME_RAMP_FRAMES,
 )
+from aurora.core.dsp_graph import DspGraph
 from aurora.core.models import AudioFormat
 
 FloatArray = npt.NDArray[np.float32]
@@ -64,6 +66,10 @@ class AudioEngine:
         self._muted = False
 
         self.analyzer = Analyzer(self._sample_rate, self._channels)
+        #: 回呼上的 DSP 級聯。預設是空的 —— 空 graph 等同 bypass，
+        #: 訊號逐位元原樣通過。EQ、Spatial 之後掛在這裡。
+        self.graph = DspGraph()
+        self.graph.prepare(self._sample_rate, self._channels, self._max_callback_frames())
 
     # ------------------------------------------------------------ 狀態
 
@@ -75,6 +81,27 @@ class AudioEngine:
     def output_format(self) -> AudioFormat:
         """引擎實際跑的格式。音質面板用它顯示訊號鏈中段。"""
         return AudioFormat(self._sample_rate, self._channels, 32, is_float=True)
+
+    @property
+    def processing_latency_frames(self) -> int:
+        """DSP 級聯引入的演算法延遲（框）。空 graph 時是 0。
+
+        目前**沒有**被 :attr:`position` 補償 —— 現在還沒有任何處理器，
+        延遲恆為 0，補償寫了也沒有東西可驗證。這個屬性先存在，是為了讓
+        歌詞對齊與未來的 A/V 同步有個一等公民的來源可用，而不是等到那時候
+        再從各處拼湊。真正接上時要連同 position 的定義一起改。
+        """
+        return self.graph.latency_frames
+
+    def _max_callback_frames(self) -> int:
+        """單次回呼的預期框數上限，給 graph 預先配置用。
+
+        裝置緩衝是 ``_BUFFER_MSEC`` 毫秒，所以一次回呼大約就是那麼多框
+        （48 kHz × 60 ms = 2880）。乘上餘裕係數是因為這只是提示：離線推進
+        （:meth:`pump`）可以送任意大小，而某些驅動也會給比名目值更大的塊。
+        """
+        nominal = self._sample_rate * _BUFFER_MSEC // 1000
+        return max(FRAMES_PER_CHUNK, nominal) * CALLBACK_FRAMES_HEADROOM
 
     @property
     def path(self) -> str | None:
@@ -136,6 +163,9 @@ class AudioEngine:
             self._teardown_device()
             self._sample_rate = sample_rate
             self.analyzer.reconfigure(sample_rate, self._channels)
+            # 濾波器係數、FFT 視窗、工作 buffer 全都跟取樣率綁定，
+            # 換了取樣率就得讓每一級重新配置。
+            self.graph.prepare(sample_rate, self._channels, self._max_callback_frames())
 
             if self._path:
                 self._rebuild_stream(int(resume_at * sample_rate))
@@ -182,6 +212,7 @@ class AudioEngine:
             self._frames_played = 0
             self._finished = False
             self.analyzer.reset_track()
+            self.graph.reset()
             return self._rebuild_stream(0)
 
     def _rebuild_stream(self, seek_frame: int) -> bool:
@@ -272,6 +303,8 @@ class AudioEngine:
                 return False
             self._finished = False
             self.analyzer.reset_track()
+            # 跳轉後濾波器的歷史狀態已經對不上新位置，留著會有短暫雜音。
+            self.graph.reset()
 
             if was_playing:
                 self.play()
@@ -300,8 +333,14 @@ class AudioEngine:
     def _process(self, frame: Any) -> bytes:
         """在音訊回呼執行緒上執行。只做 O(n) 的 numpy 運算。
 
-        送給分析器的是**施加音量之前**的訊號 —— 音質量測要看檔案本身，
-        不該被音量旋鈕影響；視覺化也因此在小音量下依然有生氣。
+        順序是 **Source Analyzer → DSP graph → User Volume**，而且這個順序
+        是語意上的要求不是巧合：
+
+        * 分析器拿到的必須是**未經任何處理**的訊號。音質量測要代表檔案本身，
+          不能被 EQ 或音量旋鈕影響；視覺化也因此在小音量下依然有生氣。
+        * 音量放最後。它是使用者的輸出旋鈕，不該進到任何量測或處理裡。
+
+        graph 預設是空的，此時這裡與加入 graph 之前逐位元相同。
         """
         samples = np.frombuffer(frame, dtype=np.float32).copy()
         if samples.size == 0:
@@ -309,6 +348,10 @@ class AudioEngine:
 
         self.analyzer.push_interleaved(samples)
         self._frames_played += samples.size // self._channels
+
+        # graph.process 保證不拋例外：任何一級出錯就整條永久降級，
+        # 這一次的 samples 原樣通過。回呼絕不能因為 DSP 出錯而死掉。
+        self.graph.process(samples)
 
         gain = self._target_gain
         if gain != 1.0 or self._applied_volume != gain:
