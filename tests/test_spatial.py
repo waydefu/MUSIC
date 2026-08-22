@@ -208,6 +208,60 @@ def test_bass_survives_mono_collapse() -> None:
     assert _rms(folded) > _rms(reference) * 0.8
 
 
+def test_hard_panned_source_keeps_its_position() -> None:
+    """**硬左偏的樂器不可以漏到右聲道。**
+
+    這條是讀文獻後補的。只用 coherence 分不出「硬左偏的乾樂器」與「真正的
+    環境音」—— 兩者的 coherence 都是 0（實測 0.000 對 0.006）。把前者當成
+    後者去相關，它就會漏到另一個聲道，定位被抹散。修正前實測有 39.5% 的
+    能量跑到原本靜音的右聲道。
+
+    Avendaño 與 Jot 的 upmix 框架同時使用 inter-channel coherence 與
+    panning index，兩者缺一不可；章程 §1.3 從 Sennheiser 學到的
+    「mix intent preservation」講的是同一件事 —— 混音師把樂器擺在左邊
+    是有意圖的，處理器不該把它搬走。
+    """
+    rng = np.random.default_rng(5)
+    source = rng.standard_normal(65536) * 0.35
+    signal = _stereo(source, np.zeros_like(source))
+
+    output = _run(_make(1.0), signal)[LATENCY * CHANNELS :]
+    left, right = _channels_of(output)
+
+    # 右聲道原本是靜音，處理後洩漏不得超過左聲道的一成。
+    assert _rms(right) < _rms(left) * 0.1
+
+
+def test_bass_image_is_not_smeared_by_decorrelation() -> None:
+    """低頻不可以被隨機相位推散。
+
+    去相關器對低頻套隨機相位會讓低音聲像散掉 —— 內部研究文件稱之為
+    「low-frequency phase chaos」，並建議在去相關網路後做適度 high-pass。
+    實測未加護欄時 <200 Hz 的 side 能量被推高 1.09 倍。
+
+    注意這**不是**單聲道相容性問題：折單聲道拿到的是 mid，而環繞只動
+    side，所以 M/S 結構本身就保證了折疊安全。這條守的是立體聲下的
+    低音聚焦度。
+    """
+    t = np.arange(1 << 17, dtype=np.float64) / RATE
+    bass = np.sin(2 * np.pi * 80.0 * t) * 0.4
+    rng = np.random.default_rng(3)
+    signal = _stereo(
+        bass + rng.standard_normal(t.size) * 0.05,
+        bass * 0.85 + rng.standard_normal(t.size) * 0.05,
+    )
+
+    output = _run(_make(1.0), signal)[LATENCY * CHANNELS :]
+
+    def low_side(samples: FloatArray) -> float:
+        spectrum = np.fft.rfft(_np_side(samples))
+        freqs = np.fft.rfftfreq(_np_side(samples).size, 1.0 / RATE)
+        return float(np.abs(spectrum[freqs < 200.0]).sum())
+
+    ratio = low_side(output) / low_side(signal[: output.size])
+    assert ratio < 1.03, f"低頻 side 被推高 {ratio:.2f}x"
+
+
 def test_mono_input_does_not_collapse_to_silence() -> None:
     """單聲道輸入（S 恆為 0）不可以變成無聲。
 
@@ -254,16 +308,35 @@ def test_level_stays_close_when_engaged() -> None:
     assert abs(result.applied_gain_db) < 1.5
 
 
-def test_amount_scales_the_effect_monotonically() -> None:
-    """乾濕比要單調 —— 中間值的效果應該落在關與全開之間。"""
-    signal = _diffuse_content()
+def test_amount_maps_linearly_to_perceived_widening() -> None:
+    """乾濕比要**依聽感線性**，不只是單調遞增。
 
-    def side_energy(amount: float) -> float:
-        left, right = _channels_of(_run(_make(amount), signal)[LATENCY * CHANNELS :])
-        return _rms((left - right) * 0.5)
+    這條是改強的。原本只斷言 ``off < half < full`` —— 而那個弱斷言讓一個
+    真實的缺陷溜了過去：環繞副本是隨機相位、與原始 side 以功率相加，
+    側能量是 √(1+g²)。直接讓增益等於 amount 的話，滑桿拉到 50% 只走完
+    25.8% 的效果、25% 更只有 5.4%，前半段像壞掉一樣 —— 但它完全滿足
+    「單調遞增」。
 
-    off, half, full = side_energy(0.0), side_energy(0.5), side_energy(1.0)
-    assert off < half < full
+    **只看方向的斷言抓不到「刻度不成比例」。** 所以這裡量的是進度百分比。
+    """
+    signal = _program()
+    base = _rms(_np_side(signal))
+
+    def progress(amount: float) -> float:
+        out = _run(_make(amount), signal)[LATENCY * CHANNELS :]
+        return _rms(_np_side(out)) / base
+
+    full = progress(1.0)
+    assert full > 1.15  # 全開要有實質效果，否則下面的比例沒有意義
+
+    for amount in (0.25, 0.5, 0.75):
+        ratio = (progress(amount) - 1.0) / (full - 1.0)
+        assert abs(ratio - amount) < 0.1, f"amount={amount} 只走完 {ratio:.1%}"
+
+
+def _np_side(signal: FloatArray) -> np.ndarray:
+    left, right = _channels_of(signal)
+    return (left - right) * 0.5
 
 
 # ------------------------------------------------------------------ 生命週期與整合

@@ -51,11 +51,14 @@ L/R 的相關性可以完全由 M/S 推出來（已驗證）::
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import numpy.typing as npt
 
 from aurora.core.constants import (
     SPATIAL_COHERENCE_SMOOTHING,
+    SPATIAL_DECORRELATION_HP_HZ,
     SPATIAL_FFT_SIZE,
     SPATIAL_HOP,
     SPATIAL_SURROUND_LEVEL,
@@ -96,12 +99,14 @@ class SpatialUpmix:
         bins = fft_size // 2 + 1
         self._smoothed_m = np.zeros(bins)
         self._smoothed_s = np.zeros(bins)
+        self._smoothed_cross = np.zeros(bins)
         # 固定的隨機相位當去相關器。固定而非時變，這樣不會產生飄移感。
         phase = np.random.default_rng(20260822).uniform(-np.pi, np.pi, bins)
         self._decorrelator = np.exp(1j * phase)
         self._decorrelator[0] = 1.0  # DC 不去相關，否則會產生直流偏移
         self._decorrelator[-1] = 1.0
 
+        self._lf_guard = np.ones(bins)
         self._pending = np.zeros((0, 2))
         self._overlap = np.zeros((fft_size, 2))
         self._emitted = np.zeros((0, 2))
@@ -149,6 +154,17 @@ class SpatialUpmix:
         self._channels = channels
         # 只處理立體聲。單聲道沒有左右差可分析，多聲道不在 P1 範圍。
         self._ready = channels == 2
+
+        # 低頻護欄：去相關只作用在 SPATIAL_DECORRELATION_HP_HZ 以上。
+        # 隨機相位打在低頻會讓低音聲像散開（內部研究稱 low-frequency
+        # phase chaos），實測未加時 <200 Hz 的 side 能量被推高 1.09 倍。
+        # 用 raised-cosine 淡入而不是硬切，硬邊會在時域造成鈴振。
+        freqs = np.fft.rfftfreq(self._fft, d=1.0 / sample_rate)
+        low = SPATIAL_DECORRELATION_HP_HZ * 0.5
+        span = max(SPATIAL_DECORRELATION_HP_HZ - low, 1.0)
+        ramp = np.clip((freqs - low) / span, 0.0, 1.0)
+        self._lf_guard = 0.5 - 0.5 * np.cos(np.pi * ramp)
+
         self.reset()
 
     def reset(self) -> None:
@@ -159,6 +175,7 @@ class SpatialUpmix:
         self._emitted = np.zeros((self._fft, 2))
         self._smoothed_m.fill(0.0)
         self._smoothed_s.fill(0.0)
+        self._smoothed_cross.fill(0.0)
 
     @property
     def latency_frames(self) -> int:
@@ -213,8 +230,8 @@ class SpatialUpmix:
         mid = np.fft.rfft((left + right) * 0.5, self._fft)
         side = np.fft.rfft((left - right) * 0.5, self._fft)
 
-        coherence = self._coherence(mid, side)
-        scene = self._build_scene(mid, side, coherence)
+        coherence, ambience = self._analyse(mid, side)
+        scene = self._build_scene(mid, side, coherence, ambience)
         out_mid, out_side = self._render_stereo(*scene, mid, side)
 
         synth_l = np.fft.irfft(out_mid + out_side, self._fft)
@@ -227,27 +244,61 @@ class SpatialUpmix:
             [self._overlap[self._hop :], np.zeros((self._hop, 2))]
         )
 
-    def _coherence(
+    def _analyse(
         self, mid: npt.NDArray[np.complex128], side: npt.NDArray[np.complex128]
-    ) -> npt.NDArray[np.float64]:
-        """時間平滑的每格相關性，落在 −1..1。
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+        """算出每格的相關性與環境音權重。
 
-        一定要平滑。逐框的瞬時值抖動很大，直接拿去當增益會讓穩定的人聲
-        每 20 ms 就被推一下，聽起來像有東西在呼吸。
+        回傳 ``(coherence, ambience_weight)``：
+
+        ``coherence`` ∈ −1..1
+            左右有多相似。1 = 置中，0 = 不相關。
+
+        ``ambience_weight`` ∈ 0..1
+            這一格有多「無方向」，由 panning index 導出。
+
+        **為什麼需要第二個量。** 只用 coherence 分不出「硬左偏的乾樂器」與
+        「真正的環境音」—— 兩者的 coherence 都是 0（實測 0.000 對 0.006）。
+        把硬左偏的樂器當環境音去相關，它就會漏到另一個聲道，定位被抹散。
+        實測未修正前，硬左偏素材有 39.5% 的能量跑到原本靜音的右聲道。
+
+        這正是文獻上的標準做法：Avendaño 與 Jot 的 upmix 框架同時使用
+        inter-channel coherence 與 panning index（similarity measure），
+        兩者缺一不可。章程 §1.3 從 Sennheiser 學到的
+        「mix intent preservation」講的也是同一件事 —— 混音師把樂器擺在
+        左邊是有意圖的，處理器不該把它搬走。
+
+        panning index 由已有的量推出來，不必額外做 FFT::
+
+            |L|² − |R|² = 4·Re(M·conj(S))
+            |L|² + |R|² = 2(|M|² + |S|²)
+            Δ = 2·Re(M·conj(S)) / (|M|² + |S|²)
+
+        Δ = ±1 是硬左／硬右，0 是置中或左右平衡。
+
+        **三個量都必須時間平滑。** 逐框的瞬時值抖動很大：未平滑時真環境音
+        的 |Δ| 量到 0.497，跟硬左偏的 1.0 分不太開；平滑後掉到 0.168，
+        差距變成 6 倍。而且不平滑的增益會讓穩定的人聲每 20 ms 被推一下，
+        聽起來像有東西在呼吸。
         """
-        power_m = np.abs(mid) ** 2
-        power_s = np.abs(side) ** 2
         alpha = SPATIAL_COHERENCE_SMOOTHING
-        self._smoothed_m = alpha * self._smoothed_m + (1.0 - alpha) * power_m
-        self._smoothed_s = alpha * self._smoothed_s + (1.0 - alpha) * power_s
-        total = self._smoothed_m + self._smoothed_s
-        return (self._smoothed_m - self._smoothed_s) / np.maximum(total, _EPS)
+        self._smoothed_m = alpha * self._smoothed_m + (1.0 - alpha) * np.abs(mid) ** 2
+        self._smoothed_s = alpha * self._smoothed_s + (1.0 - alpha) * np.abs(side) ** 2
+        self._smoothed_cross = alpha * self._smoothed_cross + (1.0 - alpha) * np.real(
+            mid * np.conj(side)
+        )
+
+        total = np.maximum(self._smoothed_m + self._smoothed_s, _EPS)
+        coherence = (self._smoothed_m - self._smoothed_s) / total
+        panning = np.abs(2.0 * self._smoothed_cross / total)
+        return coherence, np.clip(1.0 - panning, 0.0, 1.0)
 
     def _build_scene(
         self,
         mid: npt.NDArray[np.complex128],
         side: npt.NDArray[np.complex128],
         coherence: npt.NDArray[np.float64],
+        ambience: npt.NDArray[np.float64],
     ) -> tuple[
         npt.NDArray[np.complex128],
         npt.NDArray[np.complex128],
@@ -267,7 +318,7 @@ class SpatialUpmix:
         centre = mid * centre_weight
         front_mid = mid * (1.0 - centre_weight)
 
-        # 環繞餵的是 side 本身，**不再乘 (1 − centre_weight)**。
+        # 環繞餵的是 side 乘上**環境音權重**，不是乘 (1 − centre_weight)。
         #
         # 那是一道多餘且有害的閘門：side 已經就是「左右不相關」的成分，
         # 再用相關性掐一次等於平方衰減。實測真實素材上這道閘門的中位數只有
@@ -277,7 +328,11 @@ class SpatialUpmix:
         # 拿掉之後安全性質完全沒有退步，因為 **side 本身就是天然的閘門**：
         # 純置中的內容 side 恆為 0，人聲與低頻自動被保護。實測（surround=1.0）
         # 側能量 1.26x、人聲相關性仍為 1.000、低頻折單聲道 1.00x、瞬態集中 1.00。
-        surround_side = side * self._decorrelator
+        # ambience 只在「硬定位」的格子上關閉（實測硬左偏 0.000），
+        # 真實混音上仍有 0.900、真環境音 0.834 —— 效果幾乎完整保留。
+        # 這與被移除的 coherence 閘門正好相反：那道閘門是在**相關內容**上
+        # 關閉，而相關內容就是音樂的大部分，所以它殺掉的是效果本身。
+        surround_side = side * ambience * self._lf_guard * self._decorrelator
         return centre, front_mid, surround_side
 
     def _render_stereo(
@@ -296,10 +351,26 @@ class SpatialUpmix:
 
         P2 的 HRTF renderer 會取代這個方法，場景建構那一步不動。
         """
-        wet_mid = centre + front_mid
-        wet_side = dry_side * self._width + surround_side * self._surround
         amount = self._amount
+
+        # 乾濕比要**依聽感線性**，不能直接拿去乘增益。
+        #
+        # 環繞副本是隨機相位，與原始 side 以功率相加：側能量是 √(1+g²)。
+        # 直接讓 g = amount 的話這條曲線在低端幾乎是平的 —— 實測滑桿拉到
+        # 50% 只走完 25.8% 的效果、25% 更只有 5.4%，前半段像壞掉一樣。
+        #
+        # 所以反過來解：先決定「側能量要走到哪」，再回推需要多少增益。
+        peak = math.hypot(1.0, self._surround)      # 全開時的側能量比
+        target = 1.0 + amount * (peak - 1.0)        # 想要的線性進度
+        gain = math.sqrt(max(0.0, target * target - 1.0))
+
+        # 寬度是同相成分，本來就以振幅相加，線性內插即可。
+        width = 1.0 + (self._width - 1.0) * amount
+
+        # centre + front_mid 恆等於 mid，所以中置路徑在立體聲折疊下不改變
+        # 任何東西 —— 它是為了 P2 與真正的多聲道輸出而存在的結構。
+        wet_mid = centre + front_mid
         return (
             dry_mid * (1.0 - amount) + wet_mid * amount,
-            dry_side * (1.0 - amount) + wet_side * amount,
+            dry_side * width + surround_side * gain,
         )

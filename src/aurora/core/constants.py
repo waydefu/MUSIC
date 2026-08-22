@@ -72,6 +72,13 @@ SPATIAL_COHERENCE_SMOOTHING: Final = 0.85
 SPATIAL_SURROUND_LEVEL: Final = 1.0
 #: 原始 side 成分的寬度倍率。1.0 = 不改變原本的立體聲寬度。
 SPATIAL_WIDTH: Final = 1.0
+#: 去相關只作用在這個頻率以上（Hz），以下平滑地淡出到完全不處理。
+#:
+#: 低頻隨機相位會讓低音聲像散掉 —— 內部研究文件把它叫做
+#: 「low-frequency phase chaos」，並建議在去相關網路後做適度 high-pass。
+#: 實測未加時 <200 Hz 的 side 能量被推高 1.09 倍；低音本來就該緊實置中。
+#: 淡出從 SPATIAL_DECORRELATION_HP_HZ 的一半開始，避免硬邊造成鈴振。
+SPATIAL_DECORRELATION_HP_HZ: Final = 220.0
 
 # ---------------------------------------------------------------- 限幅與電表
 
