@@ -541,7 +541,26 @@ CI 兩個 job 全綠：
 不要照 `windows-latest` / `macos-latest` 的字面猜。實際值是
 `windows-2025-vs2026` 與 `macos-26-arm64`，都不是照字面推得到的那個。
 
-**S4（DSP graph 縫）尚未開始**，它屬於軌道 A，不擋 macOS。
+### 9.2 S4（DSP graph 縫）已完成
+
+`core/dsp_graph.py` 定義 `AudioProcessor` 契約與 `DspGraph` 級聯，
+`AudioEngine._process` 變成 **Source Analyzer → DSP graph → User Volume**。
+graph 預設是空的，此時訊號逐位元原樣通過。
+
+五條規則各有機器判定得了的測試（`tests/test_dsp_graph.py`，18 條）。
+**這些測試驗證過會真的失敗**：把 `process()` 的 try/except 拆掉之後，
+6 條轉紅（含兩條引擎整合測試），還原後全綠。
+
+空 graph 的成本實測 ≈ 0：p50 在 S4 前後都落在 0.116–0.132 ms 的同一區間，
+gen0 回收依然未觸發。
+
+兩件刻意**不**在 S4 做的事：
+
+- **`take_degradation()` 還沒接到 UI。** 目前沒有任何處理器，降級不可能
+  發生，接了也無法端到端驗證。這一條併入 A2（EQ）—— 屆時才有東西會壞。
+- **`processing_latency_frames` 還沒被 `position` 補償。** 延遲恆為 0，
+  補償寫了沒有東西可驗。屬性先存在，是為了讓歌詞對齊與未來的 A/V 同步
+  有個一等公民的來源，而不是到時候再從各處拼湊。
 
 ## 10. 分軌期的交接清單
 
