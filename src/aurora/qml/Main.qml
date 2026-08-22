@@ -343,6 +343,13 @@ Window {
                     open: window.qualityOpen
                 }
 
+                EffectsPanel {
+                    anchors.fill: parent
+                    controller: player.audiofx
+                    accent: window.accent
+                    open: window.effectsOpen
+                }
+
                 SettingsPanel {
                     anchors.fill: parent
                     controller: player
@@ -470,6 +477,12 @@ Window {
                         color: "white"; glow: window.accent
                         active: window.qualityOpen
                         onClicked: window.togglePanel("quality")
+                    }
+                    IconButton {
+                        icon: "equalizer"; flat: true; width: 38; height: 38; iconScale: 0.8
+                        color: "white"; glow: window.accent
+                        active: window.effectsOpen
+                        onClicked: window.togglePanel("effects")
                     }
                     IconButton {
                         icon: "settings"; flat: true; width: 38; height: 38; iconScale: 0.8
@@ -747,6 +760,7 @@ Window {
     readonly property bool libraryOpen: openPanel === "library"
     readonly property bool lyricsOpen: openPanel === "lyrics"
     readonly property bool qualityOpen: openPanel === "quality"
+    readonly property bool effectsOpen: openPanel === "effects"
     readonly property bool settingsOpen: openPanel === "settings"
 
     onOpenPanelChanged: player.setOpenPanel(openPanel)
