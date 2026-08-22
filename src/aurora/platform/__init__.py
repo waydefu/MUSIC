@@ -9,8 +9,12 @@ Python 3 只用絕對匯入，模組內寫 ``import platform`` 拿到的仍是�
 
 平台專屬實作是**在函式內**才 import 的，因為 ``platform_win`` 於模組層級
 就 import ``winreg`` 與 ``ctypes.wintypes`` —— 在 macOS 上光是 import 就會炸。
-這也表示 PyInstaller 的靜態分析看不到它們，``aurora.spec`` 的 hiddenimports
-必須明列，否則打包版會靜默退化成 NullAdapter。
+
+打包時要留意：這條路徑一旦沒被收進 bundle，:func:`adapter` 會**安靜地**
+退回 :class:`~aurora.platform.base.NullAdapter` —— 程式照常啟動、QML 照常
+載入、exit code 照樣是 0，只有音質面板變成一片「未知」。
+守門的是 ``tools/build_exe.py`` 的 ``_verify_platform_adapter()``，
+它比對 ``--validate-qml`` 印出的 adapter 名稱；光看 exit code 抓不到。
 """
 
 from __future__ import annotations

@@ -113,6 +113,36 @@ def inspect() -> int:
     return 0
 
 
+#: What ``--validate-qml`` must report on a healthy Windows build.
+#:
+#: ``aurora.platform.adapter()`` imports the platform implementation inside a
+#: function.  If that module ever fails to make it into the bundle, the
+#: selector falls back to ``NullAdapter`` **silently**: the app still starts,
+#: QML still loads, the exit code is still 0, and only the quality panel
+#: quietly turns into a wall of "unknown".  Exit codes cannot catch that, so
+#: we match on the reported adapter name instead.
+EXPECTED_ADAPTER = "Windows"
+
+
+def _verify_platform_adapter(output: str) -> int:
+    marker = "platform adapter:"
+    line = next((ln for ln in output.splitlines() if ln.startswith(marker)), None)
+    if line is None:
+        print(f"[error] the build never reported its platform adapter ('{marker}' missing)")
+        return 1
+
+    name = line[len(marker) :].strip()
+    if name != EXPECTED_ADAPTER:
+        print(f"[error] platform adapter is '{name}', expected '{EXPECTED_ADAPTER}'")
+        print("        aurora.platform.windows did not make it into the bundle;")
+        print("        the packaged app degrades to NullAdapter without any error.")
+        print("        check hiddenimports in aurora.spec and the excludes list.")
+        return 1
+
+    print(f"platform adapter resolved to {name}")
+    return 0
+
+
 def verify_runs(seconds: float = 30.0) -> int:
     """Load the whole QML tree inside the frozen executable.
 
@@ -151,7 +181,7 @@ def verify_runs(seconds: float = 30.0) -> int:
     output = (process.stdout.read() if process.stdout else "").strip()
     if process.returncode == 0:
         print("QML loaded successfully inside the frozen build")
-        return 0
+        return _verify_platform_adapter(output)
 
     print(f"[error] executable exited with code {process.returncode}")
     if output:
