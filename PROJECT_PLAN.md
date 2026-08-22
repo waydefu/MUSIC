@@ -507,17 +507,64 @@ device 模式被音訊時鐘節流，每 60 ms 之間 CPU 是閒的。
 
 ---
 
+### 9.1 架構期實作紀錄（S1–S3b 已完成，VERIFIED）
+
+CI 兩個 job 全綠：
+
+| | Windows | macOS |
+|---|---|---|
+| ruff | 通過 | 通過 |
+| mypy | 37 檔 | 32 檔（排除 `platform_win`，見下） |
+| pytest `-m "not audio"` | 220 passed / 1 skipped | 195 passed / 1 skipped |
+| QML 離屏載入 | 通過 | 通過 |
+
+**macOS job 一上線就挖出四個既存缺陷**，全部屬於「以前沒有非 Windows CI
+所以沒人會踩到」。記在這裡，因為接手時很容易重犯：
+
+1. **`skipif` 不阻止 import。** `tests/test_endpoint.py` 原本有
+   `pytestmark = skipif(sys.platform != "win32")`，但那只跳過**執行**；
+   module-level 的 `platform_win` import 在**收集階段**照樣跑，於是
+   `import winreg` 讓整個收集中斷。正解是
+   `pytest.skip(..., allow_module_level=True)`。
+   **新增 Windows 專屬測試檔時要沿用這個寫法。**
+2. **不要依賴 ffmpeg 對副檔名的隱含編碼器。** 那個預設隨版本與建置漂移：
+   macOS 上產出的 `.ogg` 讓 mutagen 丟 "no appropriate stream found"。
+3. **Homebrew 的 ffmpeg 8.x 沒有 libvorbis。** 明寫 `-c:a libvorbis` 會得到
+   "Unknown encoder"。改用 ffmpeg **內建**的 `vorbis`（需 `-strict -2`）——
+   它不依賴外部函式庫，每個 build 都有。
+4. **macOS 的 mypy 要排除 `platform_win`。** typeshed 把 `winreg` 與
+   `ctypes.wintypes` 標為 win32 專屬，直接跑會冒出 41 個 `attr-defined`。
+   用 `--exclude 'platform_win' --follow-imports=silent`；已用注入真錯的
+   方式驗證這個組合仍抓得到其他檔案的問題，不是關掉檢查換綠燈。
+
+另有一條與 runner 有關的教訓：查 runner 能力要看 **run log 裡的 Image 欄位**，
+不要照 `windows-latest` / `macos-latest` 的字面猜。實際值是
+`windows-2025-vs2026` 與 `macos-26-arm64`，都不是照字面推得到的那個。
+
+**S4（DSP graph 縫）尚未開始**，它屬於軌道 A，不擋 macOS。
+
 ## 10. 分軌期的交接清單
 
-Mac 開發者加入時要一次交付給他，避免來回問：
+**架構期已完成，這份清單現在可以直接交出去。**
 
-1. `platform/` 的 Protocol 完整簽章（§4.4）與 Windows 實作作為參考範例
-2. macOS CI job 的預期綠燈範圍（§8.1）
-3. §8.3 的地雷清單
-4. **哪些檔案不該碰**：`platform_win/`（Windows 實作細節）、`audio/`、`core/dsp*`
-   ——這些屬於軌道 A，同時改會製造衝突
-5. AGENTS.md 的證據等級規則：結論要標 VERIFIED / CODE-ONLY /
-   MANUAL-VERIFICATION-REQUIRED / BLOCKED，不要寫「應該沒問題」
+1. **起點就是 `src/aurora/platform/macos.py`。** 它已經在，繼承
+   `NullAdapter`，每個能力都降級但不會壞。檔案的 docstring 就是實作指南：
+   逐一列出每個方法要對應哪個 macOS API、以及**哪些刻意不要做**
+   （`host_context` 與檔案關聯在本階段維持降級，理由都寫在裡面）。
+2. **參考範例**是 `platform/windows.py`，契約在 `platform/base.py`（§4.4）。
+3. **一次覆寫一個方法，每補一個推一次 CI。** 沒覆寫的自動降級，不會壞。
+   建議順序：`system_animations_enabled`（最簡單、且是無障礙硬性要求）
+   → `query_endpoints` → 其餘。
+4. **兩條硬限制**（也寫在 `macos.py` 的 docstring 裡）：
+   macOS 專屬的 import 一律放方法內部，不可放模組層級
+   （`tests/test_platform.py` 會在 Windows 上 import 這個檔案來驗契約）；
+   失敗一律降級不拋例外。
+5. **地雷清單**見 §8.3，**CI 已知的四個坑**見 §9.1。
+6. **哪些檔案不該碰**：`platform_win/`（Windows 實作細節）、`audio/`、
+   `core/dsp*`、`tools/bench_callback.py` —— 這些屬於軌道 A，同時改會衝突。
+7. **AGENTS.md 的證據等級規則**：結論要標 VERIFIED / CODE-ONLY /
+   MANUAL-VERIFICATION-REQUIRED / BLOCKED，不要寫「應該沒問題」。
+   他有實機，所以 §8.2 那幾條可以做到 VERIFIED。
 
 ---
 
