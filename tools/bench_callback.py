@@ -248,13 +248,18 @@ def install_chain(engine: AudioEngine, chain: str) -> None:
         from aurora.core.constants import EQ_BAND_HZ, EQ_GAIN_LIMIT_DB
         from aurora.core.dynamics import Limiter, OutputMeter
         from aurora.core.eq import GraphicEqualizer
+        from aurora.core.reflections import EarlyReflections
         from aurora.core.spatial import SpatialUpmix
 
         equalizer = GraphicEqualizer()
         upmix = SpatialUpmix()
-        engine.graph.set_stages((equalizer, upmix, Limiter(), OutputMeter()))
+        reflections = EarlyReflections()
+        engine.graph.set_stages(
+            (equalizer, upmix, reflections, Limiter(), OutputMeter())
+        )
         equalizer.set_gains([EQ_GAIN_LIMIT_DB] * len(EQ_BAND_HZ))
         upmix.amount = 1.0
+        reflections.amount = 1.0
         return
     raise ValueError(f"未知的 chain：{chain}")
 

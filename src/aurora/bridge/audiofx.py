@@ -13,7 +13,10 @@
 
 ## 順序
 
-``EQ → Spatial → Limiter → OutputMeter``
+``EQ → Spatial → EarlyReflections → Limiter → OutputMeter``
+
+早期反射在空間音效之後：它要對**已經被拉遠的**訊號加反射，順序反過來
+就會對原始直達聲加反射，空間線索會互相矛盾。
 
 限幅器一定在最後（除了電表），因為它要兜住前面所有級加起來的峰值；
 電表在限幅器之後，因為它要代表**真正送出去的**訊號。這與章程 §6.1 的
@@ -30,6 +33,7 @@ from aurora.core.constants import EQ_BAND_HZ, EQ_GAIN_LIMIT_DB
 from aurora.core.dsp_graph import AudioProcessor
 from aurora.core.dynamics import Limiter, OutputMeter
 from aurora.core.eq import GraphicEqualizer, band_label
+from aurora.core.reflections import EarlyReflections
 from aurora.core.spatial import SpatialUpmix
 
 
@@ -62,6 +66,7 @@ class AudioFxController(QObject):
 
         self._eq = GraphicEqualizer()
         self._spatial = SpatialUpmix()
+        self._reflections = EarlyReflections()
         self._limiter = Limiter()
         self._meter = OutputMeter()
 
@@ -70,6 +75,7 @@ class AudioFxController(QObject):
         # 就會歸零、使用者調好的曲線憑空消失。
         self._eq_enabled = config.eq_enabled
         self._spatial.amount = config.spatial_amount
+        self._reflections.amount = config.spatial_amount
 
         self._rebuild()
 
@@ -138,6 +144,7 @@ class AudioFxController(QObject):
         if abs(amount - self._spatial.amount) < 1e-6:
             return
         self._spatial.amount = amount
+        self._reflections.amount = self._spatial.amount
         self._config.spatial_amount = self._spatial.amount
         self._rebuild()
         self.spatialChanged.emit()
@@ -182,7 +189,7 @@ class AudioFxController(QObject):
         eq_active = self._eq_enabled and not self._eq.is_flat
         stages: tuple[AudioProcessor, ...] = ()
         if eq_active or self._spatial.amount > 0.0:
-            stages = (self._eq, self._spatial, self._limiter, self._meter)
+            stages = (self._eq, self._spatial, self._reflections, self._limiter, self._meter)
 
         before = self._engine.graph.latency_frames
         self._engine.graph.set_stages(stages)

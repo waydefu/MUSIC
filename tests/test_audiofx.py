@@ -17,6 +17,18 @@ from aurora.audio.engine import AudioEngine
 from aurora.bridge.audiofx import AudioFxController
 from aurora.core.config import Config
 from aurora.core.constants import EQ_BAND_HZ, EQ_GAIN_LIMIT_DB
+from aurora.core.dynamics import Limiter, OutputMeter
+from aurora.core.eq import GraphicEqualizer
+from aurora.core.reflections import EarlyReflections
+from aurora.core.spatial import SpatialUpmix
+
+#: 掛上去的級聯應該長什麼樣。用型別而不是數量斷言 —— 數量對不上時
+#: 只會說「4 != 5」，型別對不上時會直接指出少了哪一級。
+EXPECTED_CHAIN = (GraphicEqualizer, SpatialUpmix, EarlyReflections, Limiter, OutputMeter)
+
+
+def _chain_types(engine: AudioEngine) -> tuple[type, ...]:
+    return tuple(type(stage) for stage in engine.graph.stages)
 
 BANDS = len(EQ_BAND_HZ)
 
@@ -67,14 +79,14 @@ def test_a_boosted_band_installs_the_chain(fx: object) -> None:
     controller.setEqEnabled(True)
     controller.setBandGain(5, 6.0)
 
-    assert len(engine.graph.stages) == 4  # EQ + Spatial + Limiter + Meter
+    assert _chain_types(engine) == EXPECTED_CHAIN
     assert controller.latencyMs > 0.0
 
 
 def test_spatial_alone_installs_the_chain(fx: object) -> None:
     controller, engine, _ = fx
     controller.setSpatialAmount(0.5)
-    assert len(engine.graph.stages) == 4
+    assert _chain_types(engine) == EXPECTED_CHAIN
     assert controller.latencyMs > 0.0
 
 
@@ -152,7 +164,7 @@ def test_settings_are_restored_from_config() -> None:
         assert controller.eqEnabled
         assert controller.bandGains[0] == pytest.approx(3.0)
         assert controller.spatialAmount == pytest.approx(0.8)
-        assert len(engine.graph.stages) == 4
+        assert _chain_types(engine) == EXPECTED_CHAIN
     finally:
         engine.close()
 

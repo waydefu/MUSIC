@@ -114,9 +114,15 @@ class SpatialUpmix:
         self._decorrelator[-1] = 1.0
 
         self._lf_guard = np.ones(bins)
+        # 全部預先配置。先前這三個用 np.concatenate 每個 hop 增長一次 ——
+        # 那違反 dsp_graph 契約的規則 2（不得有可避免的穩態配置），而且
+        # 在 2880 框的回呼下每次要跑 5.6 個 hop，配置成本會被放大。
         self._pending = np.zeros((0, 2))
+        self._pending_len = 0
         self._overlap = np.zeros((fft_size, 2))
         self._emitted = np.zeros((0, 2))
+        self._emit_head = 0
+        self._emit_len = 0
 
     # ------------------------------------------------------------ 設定
 
@@ -181,14 +187,21 @@ class SpatialUpmix:
         ramp = np.clip((freqs - low) / span, 0.0, 1.0)
         self._lf_guard = 0.5 - 0.5 * np.cos(np.pi * ramp)
 
+        # 待處理緩衝要容得下「一次最大回呼 + 一個未滿的視窗」。
+        self._pending = np.zeros((max_frames + self._fft, 2))
+        # 輸出佇列要容得下預填的一個視窗、加上一次回呼可能產生的所有 hop。
+        self._emitted = np.zeros((self._fft + max_frames + self._hop, 2))
+
         self.reset()
 
     def reset(self) -> None:
-        self._pending = np.zeros((0, 2))
-        self._overlap = np.zeros((self._fft, 2))
+        self._pending_len = 0
+        self._overlap.fill(0.0)
         # 預填一整個視窗的靜音。不能用 self.latency_frames —— reset() 會在
         # prepare() 裡被呼叫，那時 amount 還沒設，屬性會回 0。
-        self._emitted = np.zeros((self._fft, 2))
+        self._emitted.fill(0.0)
+        self._emit_head = 0
+        self._emit_len = self._fft
         self._smoothed_m.fill(0.0)
         self._smoothed_s.fill(0.0)
         self._smoothed_cross.fill(0.0)
@@ -216,31 +229,44 @@ class SpatialUpmix:
             return
 
         view = buf.reshape(frames, self._channels)
-        self._pending = np.concatenate([self._pending, view.astype(np.float64)])
+        if self._pending_len + frames > self._pending.shape[0]:
+            # 回呼比 prepare 宣告的還大時分批做，而不是在回呼裡重新配置。
+            step = self._pending.shape[0] - self._fft
+            for start in range(0, buf.size, step * self._channels):
+                self.process(buf[start : start + step * self._channels])
+            return
+        self._pending[self._pending_len : self._pending_len + frames] = view
+        self._pending_len += frames
 
-        while self._pending.shape[0] >= self._fft:
+        while self._pending_len >= self._fft:
             self._advance()
 
         # 預填保證了這裡永遠取得到，但仍留一條安全路徑：真的不夠時把靜音
         # 補在**前面**（等同多一點延遲），而不是補在後面 —— 補後面會把
         # 串流的時間順序打亂，那比多一點延遲糟糕得多。
-        if self._emitted.shape[0] >= frames:
-            wet = self._emitted[:frames]
-            self._emitted = self._emitted[frames:]
+        if self._emit_len >= frames:
+            view[:] = self._emitted[self._emit_head : self._emit_head + frames]
+            self._emit_head += frames
+            self._emit_len -= frames
         else:
-            have = self._emitted.shape[0]
-            wet = np.zeros((frames, 2))
-            wet[frames - have :] = self._emitted
-            self._emitted = self._emitted[have:]
-
-        view[:] = wet.astype(np.float32)
+            # 預填保證了這裡取得到，但仍留安全路徑：真的不夠時把靜音補在
+            # **前面**（等同多一點延遲），補在後面會打亂串流的時間順序。
+            have = self._emit_len
+            view[: frames - have] = 0.0
+            view[frames - have :] = self._emitted[self._emit_head : self._emit_head + have]
+            self._emit_head += have
+            self._emit_len = 0
 
     # ------------------------------------------------------------ 內部
 
     def _advance(self) -> None:
         """處理一個 STFT 框，並吐出一個 hop 的輸出。"""
-        block = self._pending[: self._fft]
-        self._pending = self._pending[self._hop :]
+        block = self._pending[: self._fft].copy()
+        # 就地左移而不是重新配置。
+        self._pending[: self._pending_len - self._hop] = self._pending[
+            self._hop : self._pending_len
+        ]
+        self._pending_len -= self._hop
 
         windowed = block * self._window[:, None]
         left, right = windowed[:, 0], windowed[:, 1]
@@ -256,10 +282,20 @@ class SpatialUpmix:
         synth = np.stack([synth_l, synth_r], axis=1) * self._window[:, None]
 
         self._overlap += synth
-        self._emitted = np.concatenate([self._emitted, self._overlap[: self._hop]])
-        self._overlap = np.concatenate(
-            [self._overlap[self._hop :], np.zeros((self._hop, 2))]
-        )
+
+        # 輸出佇列：先把已消費的部分往前壓實，再附加新的一個 hop。
+        if self._emit_head + self._emit_len + self._hop > self._emitted.shape[0]:
+            self._emitted[: self._emit_len] = self._emitted[
+                self._emit_head : self._emit_head + self._emit_len
+            ]
+            self._emit_head = 0
+        tail = self._emit_head + self._emit_len
+        self._emitted[tail : tail + self._hop] = self._overlap[: self._hop]
+        self._emit_len += self._hop
+
+        # overlap 就地左移並把尾巴清零，取代 concatenate。
+        self._overlap[: -self._hop] = self._overlap[self._hop :]
+        self._overlap[-self._hop :] = 0.0
 
     def _analyse(
         self, mid: npt.NDArray[np.complex128], side: npt.NDArray[np.complex128]
