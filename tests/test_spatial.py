@@ -448,3 +448,131 @@ def test_graph_sums_spatial_latency() -> None:
     graph.prepare(RATE, CHANNELS, BLOCK)
     graph.set_stages((upmix,))
     assert graph.latency_frames == LATENCY
+
+
+# ------------------------------------------------------------------ P2 HRTF renderer
+
+
+def _binaural(amount: float) -> SpatialUpmix:
+    upmix = SpatialUpmix()
+    upmix.binaural = True
+    upmix.prepare(RATE, CHANNELS, BLOCK)
+    upmix.amount = amount
+    return upmix
+
+
+def test_binaural_is_off_by_default() -> None:
+    """預設關閉是 §9.9 預算決定的前提：關著時一格濾波器都不算。"""
+    assert not SpatialUpmix().binaural
+
+
+def test_binaural_does_not_change_latency() -> None:
+    """HRTF 與 Spatial 共用同一個 STFT，所以延遲必須一模一樣。
+
+    §9.4 的結論是「不能自己再開一組 STFT」。多開一組最先露餡的地方就是
+    延遲 —— 這條測試把那個約束變成機器可判定的。
+    """
+    stereo, binaural = _make(1.0), _binaural(1.0)
+    assert binaural.latency_frames == stereo.latency_frames == SPATIAL_FFT_SIZE
+
+
+def test_binaural_fades_out_with_amount() -> None:
+    """滑桿往下拉，HRTF 的染色必須跟著退掉。
+
+    **不能用 ``amount=0`` 驗這件事** —— 那時 ``active`` 是 False，整個
+    processor 直接旁通，測試根本進不到 renderer 就綠了。所以這裡用一個
+    小但仍然啟用的 amount。
+
+    守的是 binaural renderer 與 stereo renderer 的一個刻意差異：stereo
+    是靠 ``width=1`` 天然透明的，可以把 width 直接乘在乾 side 上；但 HRTF
+    會改變 side 的頻譜，所以這裡的 side 另外與乾訊號交叉淡入。少了那個
+    淡入，滑桿拉到接近 0 仍然聽得到滿量的染色。
+    """
+    signal = _program()
+
+    def deviation(amount: float) -> float:
+        output = _run(_binaural(amount), signal)[LATENCY * CHANNELS :]
+        reference = signal[: output.size]
+        return _rms(output - reference) / _rms(reference)
+
+    faint, full = deviation(0.05), deviation(1.0)
+    assert faint < full * 0.25, f"amount=0.05 還留著 {faint / full:.0%} 的效果"
+    assert faint < 0.12, f"amount=0.05 的偏離就有 {faint:.1%}"
+
+
+def test_binaural_keeps_centred_content_centred() -> None:
+    """置中的內容送到兩耳的路徑相同，所以左右必須維持相等。
+
+    這條抓的是「左右接反」與「置中喇叭誤用了近耳響應」——
+    兩者都會讓人聲從正中央跑掉，而且用聽的很難察覺是哪一邊。
+    """
+    output = _run(_binaural(1.0), _mono_content())[LATENCY * CHANNELS :]
+    left, right = _channels_of(output)
+    assert _correlation(left, right) > 0.999
+    assert _rms(left) == pytest.approx(_rms(right), rel=1e-3)
+
+
+def test_binaural_actually_changes_the_render() -> None:
+    """開了 HRTF 就必須聽得出差別，否則濾波器等於沒接上。
+
+    只驗「有變」不夠 —— 浮點雜訊也算有變。所以比的是與 stereo renderer
+    的差異能量佔比，要達到可察覺的量級。
+    """
+    signal = _program()
+    stereo = _run(_make(1.0), signal)[LATENCY * CHANNELS :]
+    binaural = _run(_binaural(1.0), signal)[LATENCY * CHANNELS :]
+    difference = _rms(binaural - stereo) / _rms(stereo)
+    assert difference > 0.05, f"HRTF 只改變了 {difference:.1%}，濾波器可能沒生效"
+
+
+def test_binaural_does_not_blow_up_the_level() -> None:
+    """HRTF 的和路徑在某些頻率會相加、某些會抵消。響度補償要照樣接得住。"""
+    signal = _program()
+    output = _run(_binaural(1.0), signal)[LATENCY * CHANNELS :]
+    ratio = _rms(output) / _rms(signal[: output.size])
+    assert 0.7 < ratio < 1.4, f"binaural 的響度偏差到 {ratio:.2f}x"
+
+
+def test_binaural_does_not_collapse_to_mono() -> None:
+    """章程 §6.3 點名的四種失敗模式之一，HRTF renderer 一樣要守。"""
+    signal = _program()
+    output = _run(_binaural(1.0), signal)[LATENCY * CHANNELS :]
+    left, right = _channels_of(output)
+    assert _correlation(left, right) < 0.99
+
+
+def _iacc(processor: SpatialUpmix, signal: FloatArray) -> float:
+    """耳間相關性（IACC）。真實的雙耳渲染不會讓一般音樂變成反相。"""
+    output = _run(processor, signal)[LATENCY * CHANNELS :]
+    left, right = _channels_of(output)
+    return _correlation(left, right)
+
+
+def test_binaural_tracks_stereo_at_moderate_amount() -> None:
+    """一半以下的設定，HRTF 不該把音場拉到與 stereo renderer 差很遠。
+
+    這是目前**成立**的部分：0.5 以下兩個 renderer 的 IACC 幾乎重疊
+    （實測 0.623 vs 0.632）。全開時才會分岔，那部分見下面那條 xfail。
+    """
+    signal = _program()
+    assert _iacc(_binaural(0.5), signal) == pytest.approx(_iacc(_make(0.5), signal), abs=0.1)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "已知缺口：全開時環繞是以 ±u 反相餵給 SL/SR 的（P1 折回立體聲時無害），"
+        "經過 HRTF 之後會產生反相音場。實測 IACC 掉到 −0.45，"
+        "而真實雙耳渲染不會讓一般音樂變成負相關。"
+        "修法要嘛讓環繞餵獨立的去相關訊號、要嘛補 diffuse-field EQ —— "
+        "兩者都要動到場景建構，屬於下一個切片。"
+    ),
+)
+def test_binaural_keeps_a_real_mix_positively_correlated() -> None:
+    """一般音樂經過雙耳渲染後，兩耳仍應正相關。
+
+    負的 IACC 聽起來是「在頭裡面、相位怪、不穩定」，正好是頭外化的反面。
+    這條刻意留成 strict xfail 而不是拿掉：它是 P2 下一步的驗收條件，
+    修好的那天測試會因為「意外通過」而叫，不會被默默忘記。
+    """
+    assert _iacc(_binaural(1.0), _program()) > 0.0

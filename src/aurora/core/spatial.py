@@ -69,6 +69,7 @@ from aurora.core.constants import (
     SPATIAL_SURROUND_LEVEL,
     SPATIAL_WIDTH,
 )
+from aurora.core.hrtf import HrtfFilters, synthetic_filters
 
 FloatArray = npt.NDArray[np.float32]
 
@@ -96,6 +97,11 @@ class SpatialUpmix:
         self._width = SPATIAL_WIDTH
         self._channels = 0
         self._ready = False
+        # P2 HRTF。預設關閉 —— 關著的時候一格濾波器都不算，
+        # 回呼成本與 P1 逐位元相同（§9.9 的預算決定因此不受影響）。
+        self._binaural = False
+        self._hrtf: HrtfFilters | None = None
+        self._sample_rate = 0
 
         # sqrt-Hann 用於分析與合成。平方後就是 Hann，而 Hann 在 50% 重疊下
         # 相加剛好為 1 —— 這是完美重建的來源。
@@ -140,6 +146,21 @@ class SpatialUpmix:
             self.reset()
 
     @property
+    def binaural(self) -> bool:
+        """是否用 HRTF renderer 取代 Basic Stereo Renderer。
+
+        **場景建構那一步不受影響**（``_build_scene`` 原地重用），換掉的只有
+        renderer —— 這正是 §9.4 要求的「與 Spatial 共用同一個 STFT」。
+        """
+        return self._binaural
+
+    @binaural.setter
+    def binaural(self, value: bool) -> None:
+        self._binaural = bool(value)
+        if self._binaural and self._sample_rate:
+            self._hrtf = synthetic_filters(self._sample_rate, self._fft)
+
+    @property
     def surround_level(self) -> float:
         """去相關環繞成分折回立體聲時的音量。"""
         return self._surround
@@ -174,6 +195,9 @@ class SpatialUpmix:
 
     def prepare(self, sample_rate: int, channels: int, max_frames: int) -> None:
         self._channels = channels
+        self._sample_rate = sample_rate
+        # 濾波器與 STFT 綁在同一個 fft_size 上，取樣率一變就得重算。
+        self._hrtf = synthetic_filters(sample_rate, self._fft) if self._binaural else None
         # 只處理立體聲。單聲道沒有左右差可分析，多聲道不在 P1 範圍。
         self._ready = channels == 2
 
@@ -275,7 +299,10 @@ class SpatialUpmix:
 
         coherence, ambience = self._analyse(mid, side)
         scene = self._build_scene(mid, side, coherence, ambience)
-        out_mid, out_side = self._render_stereo(*scene, mid, side)
+        if self._binaural and self._hrtf is not None:
+            out_mid, out_side = self._render_binaural(*scene, mid, side)
+        else:
+            out_mid, out_side = self._render_stereo(*scene, mid, side)
 
         synth_l = np.fft.irfft(out_mid + out_side, self._fft)
         synth_r = np.fft.irfft(out_mid - out_side, self._fft)
@@ -409,6 +436,23 @@ class SpatialUpmix:
         P2 的 HRTF renderer 會取代這個方法，場景建構那一步不動。
         """
         amount = self._amount
+        gain, width, depth = self._wet_coefficients()
+        wet_mid = centre * depth + front_mid
+
+        out_mid = dry_mid * (1.0 - amount) + wet_mid * amount
+        out_side = dry_side * width + surround_side * gain
+
+        # 響度補償：對 mid 與 side **等量**施加，所以總響度回到原本，
+        # 而 D/R 比保留下來。不補的話使用者會把「變小聲」誤認成「變遠」。
+        return self._compensate(out_mid, out_side, dry_mid, dry_side)
+
+    def _wet_coefficients(self) -> tuple[float, float, float]:
+        """濕訊號的三個係數：環繞增益、寬度、距離衰減。
+
+        抽出來是因為 HRTF renderer 要用同一組值。這三條公式各自都有踩過坑
+        的理由（見下面的註解），複製一份到另一個 renderer 遲早會走鐘。
+        """
+        amount = self._amount
 
         # 乾濕比要**依聽感線性**，不能直接拿去乘增益。
         #
@@ -431,13 +475,40 @@ class SpatialUpmix:
         # 都一動也沒動。那條恆等式就是「聽起來沒有拉遠」的成因：
         # 實測 D/R 從 0 到 100% 只變 −0.62 dB，遠低於可察覺門檻。
         depth = 10.0 ** (self._depth_db * amount**SPATIAL_DEPTH_CURVE / 20.0)
-        wet_mid = centre * depth + front_mid
+        return gain, width, depth
+
+    def _render_binaural(
+        self,
+        centre: npt.NDArray[np.complex128],
+        front_mid: npt.NDArray[np.complex128],
+        surround_side: npt.NDArray[np.complex128],
+        dry_mid: npt.NDArray[np.complex128],
+        dry_side: npt.NDArray[np.complex128],
+    ) -> tuple[npt.NDArray[np.complex128], npt.NDArray[np.complex128]]:
+        """HRTF Renderer：把同一個場景改用頭部轉移函數送到兩耳。
+
+        場景與 :meth:`_render_stereo` 完全相同，差別只在虛擬喇叭不再是直接
+        折回左右聲道，而是各自經過該方位角的 HRTF。因為場景是 M/S 表示，
+        整段可以留在 M/S 域，只要四條濾波器 —— 推導寫在 ``core/hrtf.py``
+        的模組 docstring，並由 ``tests/test_hrtf.py`` 對逐喇叭參考實作驗證。
+
+        **與 stereo renderer 的一個刻意差異**：這裡的 side 也跟乾訊號做
+        交叉淡入。stereo renderer 把 width 直接乘在乾 side 上（``width=1``
+        時那就是原訊號，天然透明），但 HRTF 會改變 side 的頻譜，
+        不淡入的話 ``amount=0`` 就不再是旁通了。
+        """
+        hrtf = self._hrtf
+        assert hrtf is not None  # 呼叫端已經檢查過
+        amount = self._amount
+        gain, width, depth = self._wet_coefficients()
+
+        wet_mid = centre * depth * hrtf.centre + front_mid * hrtf.front_sum
+        wet_side = (
+            dry_side * width * hrtf.front_diff + surround_side * gain * hrtf.surround_diff
+        )
 
         out_mid = dry_mid * (1.0 - amount) + wet_mid * amount
-        out_side = dry_side * width + surround_side * gain
-
-        # 響度補償：對 mid 與 side **等量**施加，所以總響度回到原本，
-        # 而 D/R 比保留下來。不補的話使用者會把「變小聲」誤認成「變遠」。
+        out_side = dry_side * (1.0 - amount) + wet_side * amount
         return self._compensate(out_mid, out_side, dry_mid, dry_side)
 
     def _compensate(

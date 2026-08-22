@@ -226,7 +226,7 @@ def _measure_pressure(engine: TimedEngine, frames: int, rounds: int) -> Pressure
     )
 
 
-def install_chain(engine: AudioEngine, chain: str) -> None:
+def install_chain(engine: AudioEngine, chain: str, binaural: bool = False) -> None:
     """把要量測的 DSP 級聯掛上去。
 
     ``eq`` 刻意用**最大增益**：十段全開 +12 dB 是使用者做得到的最壞情況，
@@ -249,6 +249,7 @@ def install_chain(engine: AudioEngine, chain: str) -> None:
         from aurora.core.spatial import SpatialUpmix
 
         upmix = SpatialUpmix()
+        upmix.binaural = binaural
         engine.graph.set_stages((upmix, Limiter(), OutputMeter()))
         upmix.amount = 1.0
         return
@@ -261,6 +262,7 @@ def install_chain(engine: AudioEngine, chain: str) -> None:
 
         equalizer = GraphicEqualizer()
         upmix = SpatialUpmix()
+        upmix.binaural = binaural
         reflections = EarlyReflections()
         engine.graph.set_stages(
             (equalizer, upmix, reflections, Limiter(), OutputMeter())
@@ -272,9 +274,11 @@ def install_chain(engine: AudioEngine, chain: str) -> None:
     raise ValueError(f"未知的 chain：{chain}")
 
 
-def run_offline(source: Path, sample_rate: int, target: int, frames: int, chain: str) -> int:
+def run_offline(
+    source: Path, sample_rate: int, target: int, frames: int, chain: str, binaural: bool
+) -> int:
     engine = TimedEngine(sample_rate, capacity=target + WARMUP_CALLBACKS + 16)
-    install_chain(engine, chain)
+    install_chain(engine, chain, binaural)
     if not engine.load(str(source)):
         print(f"載入失敗：{source}", file=sys.stderr)
         return 2
@@ -303,14 +307,16 @@ def run_offline(source: Path, sample_rate: int, target: int, frames: int, chain:
     )
 
 
-def run_device(source: Path, sample_rate: int, target: int, muted: bool, chain: str) -> int:
+def run_device(
+    source: Path, sample_rate: int, target: int, muted: bool, chain: str, binaural: bool
+) -> int:
     """真實裝置 + Qt 事件迴圈 + 60 Hz 分析器 tick。"""
     from PySide6.QtCore import QCoreApplication, QTimer
 
     app = QCoreApplication(sys.argv[:1])
     engine = TimedEngine(sample_rate, capacity=target + WARMUP_CALLBACKS + 4096)
     engine.muted = muted
-    install_chain(engine, chain)
+    install_chain(engine, chain, binaural)
 
     if not engine.load(str(source)):
         print(f"載入失敗：{source}", file=sys.stderr)
@@ -404,6 +410,14 @@ def main(argv: list[str] | None = None) -> int:
             "full = 兩者疊加。全部再加限幅器與輸出電表。"
         ),
     )
+    parser.add_argument(
+        "--binaural",
+        action="store_true",
+        help=(
+            "Spatial 改用 P2 的 HRTF renderer（只影響 spatial 與 full）。"
+            "用來回答 §9.9 要求的「P2 之前重新檢視預算」。"
+        ),
+    )
     parser.set_defaults(mode="offline")
     options = parser.parse_args(argv)
 
@@ -414,10 +428,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if options.mode == "device":
         return run_device(
-            options.file, options.rate, options.callbacks, not options.unmuted, options.chain
+            options.file,
+            options.rate,
+            options.callbacks,
+            not options.unmuted,
+            options.chain,
+            options.binaural,
         )
     return run_offline(
-        options.file, options.rate, options.callbacks, options.frames, options.chain
+        options.file,
+        options.rate,
+        options.callbacks,
+        options.frames,
+        options.chain,
+        options.binaural,
     )
 
 
