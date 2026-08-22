@@ -179,6 +179,14 @@ def _report(
         if pct > limit:
             failed = True
         print(f"  [{mark}] {label:<5} {pct:6.2f}%  ≤ {limit:.0f}%")
+
+    if failed:
+        # **不要因為有已知偏離就把這個警告關掉。** 消音會讓未來真正的回歸
+        # 一起被藏起來。工具繼續誠實對照章程 §6.3，脈絡由文件提供。
+        print()
+        print("※ 全鏈最大設定（EQ 十段全開 + Spatial 100% + 反射 100%）的超標")
+        print("  是已記錄的決定，見 PROJECT_PLAN.md §9.9。單開任一效果都在預算內。")
+        print("  若**單一效果**或日常設定也超標，那就是新的回歸，要查。")
     return 1 if failed else 0
 
 
