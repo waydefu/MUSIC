@@ -59,8 +59,12 @@ import numpy.typing as npt
 from aurora.core.constants import (
     SPATIAL_COHERENCE_SMOOTHING,
     SPATIAL_DECORRELATION_HP_HZ,
+    SPATIAL_DEPTH_CURVE,
+    SPATIAL_DEPTH_DB,
     SPATIAL_FFT_SIZE,
     SPATIAL_HOP,
+    SPATIAL_MAKEUP_CEILING,
+    SPATIAL_MAKEUP_SMOOTHING,
     SPATIAL_PANNING_KNEE,
     SPATIAL_SURROUND_LEVEL,
     SPATIAL_WIDTH,
@@ -88,6 +92,7 @@ class SpatialUpmix:
         self._hop = hop
         self._amount = 0.0
         self._surround = SPATIAL_SURROUND_LEVEL
+        self._depth_db = SPATIAL_DEPTH_DB
         self._width = SPATIAL_WIDTH
         self._channels = 0
         self._ready = False
@@ -101,6 +106,7 @@ class SpatialUpmix:
         self._smoothed_m = np.zeros(bins)
         self._smoothed_s = np.zeros(bins)
         self._smoothed_cross = np.zeros(bins)
+        self._makeup = 1.0
         # 固定的隨機相位當去相關器。固定而非時變，這樣不會產生飄移感。
         phase = np.random.default_rng(20260822).uniform(-np.pi, np.pi, bins)
         self._decorrelator = np.exp(1j * phase)
@@ -135,6 +141,15 @@ class SpatialUpmix:
     @surround_level.setter
     def surround_level(self, value: float) -> None:
         self._surround = float(max(0.0, value))
+
+    @property
+    def depth_db(self) -> float:
+        """全開時把置中直達成分壓低多少 dB。設 0 可關掉距離機制。"""
+        return self._depth_db
+
+    @depth_db.setter
+    def depth_db(self, value: float) -> None:
+        self._depth_db = float(min(0.0, value))
 
     @property
     def width(self) -> float:
@@ -177,6 +192,7 @@ class SpatialUpmix:
         self._smoothed_m.fill(0.0)
         self._smoothed_s.fill(0.0)
         self._smoothed_cross.fill(0.0)
+        self._makeup = 1.0
 
     @property
     def latency_frames(self) -> int:
@@ -372,10 +388,37 @@ class SpatialUpmix:
         # 寬度是同相成分，本來就以振幅相加，線性內插即可。
         width = 1.0 + (self._width - 1.0) * amount
 
-        # centre + front_mid 恆等於 mid，所以中置路徑在立體聲折疊下不改變
-        # 任何東西 —— 它是為了 P2 與真正的多聲道輸出而存在的結構。
-        wet_mid = centre + front_mid
-        return (
-            dry_mid * (1.0 - amount) + wet_mid * amount,
-            dry_side * width + surround_side * gain,
-        )
+        # 距離機制：把**置中的直達成分**往後推，擴散成分不動。
+        #
+        # 在這之前 centre + front_mid 恆等於 mid，於是
+        # dry_mid*(1-a) + wet_mid*a 也恆等於 mid —— 直達聲在任何 amount 下
+        # 都一動也沒動。那條恆等式就是「聽起來沒有拉遠」的成因：
+        # 實測 D/R 從 0 到 100% 只變 −0.62 dB，遠低於可察覺門檻。
+        depth = 10.0 ** (self._depth_db * amount**SPATIAL_DEPTH_CURVE / 20.0)
+        wet_mid = centre * depth + front_mid
+
+        out_mid = dry_mid * (1.0 - amount) + wet_mid * amount
+        out_side = dry_side * width + surround_side * gain
+
+        # 響度補償：對 mid 與 side **等量**施加，所以總響度回到原本，
+        # 而 D/R 比保留下來。不補的話使用者會把「變小聲」誤認成「變遠」。
+        return self._compensate(out_mid, out_side, dry_mid, dry_side)
+
+    def _compensate(
+        self,
+        out_mid: npt.NDArray[np.complex128],
+        out_side: npt.NDArray[np.complex128],
+        dry_mid: npt.NDArray[np.complex128],
+        dry_side: npt.NDArray[np.complex128],
+    ) -> tuple[npt.NDArray[np.complex128], npt.NDArray[np.complex128]]:
+        """把總能量拉回處理前的水準，但不動 mid 與 side 的比例。"""
+        before = float(np.sum(np.abs(dry_mid) ** 2) + np.sum(np.abs(dry_side) ** 2))
+        after = float(np.sum(np.abs(out_mid) ** 2) + np.sum(np.abs(out_side) ** 2))
+        if after > _EPS and before > _EPS:
+            target = min(math.sqrt(before / after), SPATIAL_MAKEUP_CEILING)
+        else:
+            target = 1.0
+        # 平滑，否則逐框變動會聽成抽吸。
+        alpha = SPATIAL_MAKEUP_SMOOTHING
+        self._makeup = alpha * self._makeup + (1.0 - alpha) * target
+        return out_mid * self._makeup, out_side * self._makeup
