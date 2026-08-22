@@ -301,8 +301,9 @@ Window {
                     accent2: window.accent2
                     bloomEnabled: motion.bloomEnabled
                     bloomStrength: motion.bloomStrength
-                    opacity: window.lyricsOpen || window.playlistOpen || window.libraryOpen || window.qualityOpen || window.settingsOpen
-                             ? 0.25 : 1.0
+                    // 用衍生屬性而不是逐一列舉。原本的寫法漏掉新面板時，
+                    // 頻譜就會直接打穿面板打在文字上 —— 加音效面板時真的發生過。
+                    opacity: window.anyPanelOpen ? 0.25 : 1.0
                     Behavior on opacity { NumberAnimation { duration: Motion.panel } }
                 }
 
@@ -341,6 +342,13 @@ Window {
                     controller: player.quality
                     accent: window.accent
                     open: window.qualityOpen
+                }
+
+                EffectsPanel {
+                    anchors.fill: parent
+                    controller: player.audiofx
+                    accent: window.accent
+                    open: window.effectsOpen
                 }
 
                 SettingsPanel {
@@ -470,6 +478,12 @@ Window {
                         color: "white"; glow: window.accent
                         active: window.qualityOpen
                         onClicked: window.togglePanel("quality")
+                    }
+                    IconButton {
+                        icon: "equalizer"; flat: true; width: 38; height: 38; iconScale: 0.8
+                        color: "white"; glow: window.accent
+                        active: window.effectsOpen
+                        onClicked: window.togglePanel("effects")
                     }
                     IconButton {
                         icon: "settings"; flat: true; width: 38; height: 38; iconScale: 0.8
@@ -747,6 +761,8 @@ Window {
     readonly property bool libraryOpen: openPanel === "library"
     readonly property bool lyricsOpen: openPanel === "lyrics"
     readonly property bool qualityOpen: openPanel === "quality"
+    readonly property bool anyPanelOpen: openPanel !== ""
+    readonly property bool effectsOpen: openPanel === "effects"
     readonly property bool settingsOpen: openPanel === "settings"
 
     onOpenPanelChanged: player.setOpenPanel(openPanel)
@@ -901,6 +917,7 @@ Window {
     Shortcut { sequence: "Ctrl+O"; onActivated: libraryFolderDialog.open() }
     Shortcut { sequence: "P"; onActivated: window.togglePanel("playlist") }
     Shortcut { sequence: "I"; onActivated: window.togglePanel("quality") }
+    Shortcut { sequence: "E"; onActivated: window.togglePanel("effects") }
     Shortcut { sequence: "Ctrl+,"; onActivated: window.togglePanel("settings") }
     Shortcut { sequence: "C"; onActivated: window.cinema = !window.cinema }
     Shortcut { sequence: "F11"; onActivated: window.toggleFullscreen() }

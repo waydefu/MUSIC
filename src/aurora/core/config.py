@@ -14,14 +14,15 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Literal
 
+from aurora.core.constants import EQ_BAND_HZ, EQ_GAIN_LIMIT_DB
 from aurora.core.paths import config_file
 
 RepeatMode = Literal["off", "all", "one"]
 QualityPreset = Literal["cinematic", "balanced", "performance"]
-PanelName = Literal["", "playlist", "library", "lyrics", "quality", "settings"]
+PanelName = Literal["", "playlist", "library", "lyrics", "quality", "settings", "effects"]
 
 _PANEL_NAMES: frozenset[str] = frozenset(
-    {"", "playlist", "library", "lyrics", "quality", "settings"}
+    {"", "playlist", "library", "lyrics", "quality", "settings", "effects"}
 )
 
 _REPEAT_MODES: frozenset[str] = frozenset({"off", "all", "one"})
@@ -67,6 +68,11 @@ class Config:
     #: ``None`` 表示跟隨 Windows 的「顯示動畫」系統設定。
     reduce_motion: bool | None = None
     cinema_mode: bool = False
+
+    # 音效。預設全關 —— 使用者沒開過就不該付延遲與運算成本。
+    eq_enabled: bool = False
+    eq_gains: list[float] = field(default_factory=lambda: [0.0] * len(EQ_BAND_HZ))
+    spatial_amount: float = 0.0
 
     # ---------------------------------------------------------- 序列化
 
@@ -119,6 +125,18 @@ class Config:
 
         if self.reduce_motion is not None:
             self.reduce_motion = bool(self.reduce_motion)
+
+        # 音效的值全部來自使用者可編輯的 JSON，一律夾回合法範圍。
+        # 段數不對就整組丟掉退回全平 —— 補零會讓使用者拿到一條他沒設定過的
+        # 曲線，那比重置更難理解。
+        self.eq_enabled = bool(self.eq_enabled)
+        gains = [
+            min(max(float(value), -EQ_GAIN_LIMIT_DB), EQ_GAIN_LIMIT_DB)
+            for value in self.eq_gains
+            if isinstance(value, int | float)
+        ]
+        self.eq_gains = gains if len(gains) == len(EQ_BAND_HZ) else [0.0] * len(EQ_BAND_HZ)
+        self.spatial_amount = min(max(float(self.spatial_amount), 0.0), 1.0)
 
         self.window.width = max(720, int(self.window.width))
         self.window.height = max(480, int(self.window.height))

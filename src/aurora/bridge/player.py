@@ -21,6 +21,7 @@ from pathlib import Path
 from PySide6.QtCore import Property, QObject, QTimer, QUrl, Signal, Slot
 
 from aurora.audio.engine import AudioEngine
+from aurora.bridge.audiofx import AudioFxController
 from aurora.bridge.lyrics import LyricsController
 from aurora.bridge.metadata_loader import MetadataLoader
 from aurora.bridge.models import PlaylistFilterProxy, PlaylistModel, SpectrumModel
@@ -75,6 +76,7 @@ class PlayerController(QObject):
         self._theme = ThemeController(self)
         self._lyrics = LyricsController(self)
         self._quality = QualityController(self._engine, self)
+        self._audiofx = AudioFxController(self._engine, config, self)
 
         self._index = -1
         self._position = 0.0
@@ -131,6 +133,10 @@ class PlayerController(QObject):
     @Property(QObject, constant=True)
     def quality(self) -> QualityController:
         return self._quality
+
+    @Property(QObject, constant=True)
+    def audiofx(self) -> AudioFxController:
+        return self._audiofx
 
     @Property(bool, notify=miniModeChanged)
     def miniMode(self) -> bool:
@@ -683,6 +689,9 @@ class PlayerController(QObject):
 
     def _tick(self) -> None:
         self._drain_metadata()
+        # DSP 降級只會在音訊回呼裡被標記（那裡不能發 Qt signal），
+        # 所以要在主執行緒把它撈出來。
+        self._audiofx.poll()
         dt = 1.0 / UI_TICK_HZ
         frame = self._engine.analyzer.tick(dt)
         self._spectrum.apply(frame)

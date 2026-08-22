@@ -272,6 +272,27 @@ Item {
             }
         }
 
+        Shape {
+            anchors.fill: parent
+            visible: root.icon === "equalizer"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: 1.8
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                PathSvg { path: "M5,2.6 L5,17.4 M10,2.6 L10,17.4 M15,2.6 L15,17.4" }
+            }
+            // 旋鈕高低不同，一眼就看得出是推桿而不是條狀圖
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: 3.4
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                PathSvg { path: "M5,6.4 L5,7.6 M10,12.4 L10,13.6 M15,8.4 L15,9.6" }
+            }
+        }
+
         // 視窗控制
         Shape {
             anchors.fill: parent

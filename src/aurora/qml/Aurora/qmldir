@@ -6,6 +6,7 @@ singleton Strings 1.0 Strings.qml
 
 Backdrop 1.0 Backdrop.qml
 CoverCard 1.0 CoverCard.qml
+EffectsPanel 1.0 EffectsPanel.qml
 GlassPanel 1.0 GlassPanel.qml
 IconButton 1.0 IconButton.qml
 LibraryPanel 1.0 LibraryPanel.qml

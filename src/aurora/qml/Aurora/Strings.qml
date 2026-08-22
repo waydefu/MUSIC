@@ -21,6 +21,19 @@ QtObject {
     readonly property string quality: "音質"
     readonly property string library: "音樂庫"
     readonly property string settings: "設定"
+    readonly property string effects: "音效"
+
+    // 音效
+    readonly property string equalizer: "等化器"
+    readonly property string equalizerHint: "拉高某一段時，整條曲線會自動降低相同的量，所以音量不會變大、也不會破音。"
+    readonly property string spatial: "空間音效"
+    readonly property string spatialHint: "把左右不相關的殘響與環境音展開，置中的人聲與低音維持原位。"
+    readonly property string resetEq: "歸零"
+    readonly property string headroom: "自動餘裕"
+    readonly property string addedLatency: "額外延遲"
+    readonly property string effectsOff: "關閉時完全不處理訊號，也不會有延遲。"
+    readonly property string limiterEngaged: "限幅器曾經作動 —— 上游有訊號超出餘裕"
+    readonly property string fxDegraded: "音效發生錯誤，已自動停用"
 
     // 空狀態
     readonly property string emptyPlaylist: "把音樂檔或資料夾拖進來"

@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from aurora.core.config import Config, WindowGeometry, load_config, save_config
+from aurora.core.constants import EQ_BAND_HZ, EQ_GAIN_LIMIT_DB
 
 
 def test_round_trip_preserves_everything(tmp_path: Path) -> None:
@@ -142,3 +143,49 @@ def test_existing_config_is_overwritten_not_appended(tmp_path: Path) -> None:
     save_config(Config(volume=0.1), target)
     assert load_config(target).volume == 0.1
     assert json.loads(target.read_text(encoding="utf-8"))["volume"] == 0.1
+
+
+# ------------------------------------------------------------------ 音效設定
+#
+# 這些值全部來自使用者可編輯的 JSON，一個都不能信任。
+
+
+def test_eq_gains_are_clamped_to_the_limit() -> None:
+    config = Config.from_dict({"eq_gains": [99.0] + [0.0] * (len(EQ_BAND_HZ) - 1)})
+    assert config.eq_gains[0] == EQ_GAIN_LIMIT_DB
+
+
+def test_wrong_band_count_falls_back_to_flat() -> None:
+    """段數不對就整組丟掉退回全平。
+
+    補零會讓使用者拿到一條他從沒設定過的曲線，那比乾脆重置更難理解。
+    """
+    config = Config.from_dict({"eq_gains": [3.0, 4.0]})
+    assert config.eq_gains == [0.0] * len(EQ_BAND_HZ)
+
+
+def test_non_numeric_gains_are_discarded() -> None:
+    config = Config.from_dict({"eq_gains": ["loud"] * len(EQ_BAND_HZ)})
+    assert config.eq_gains == [0.0] * len(EQ_BAND_HZ)
+
+
+def test_spatial_amount_is_clamped() -> None:
+    assert Config.from_dict({"spatial_amount": 5.0}).spatial_amount == 1.0
+    assert Config.from_dict({"spatial_amount": -2.0}).spatial_amount == 0.0
+
+
+def test_effects_panel_is_a_valid_panel_name() -> None:
+    assert Config.from_dict({"open_panel": "effects"}).open_panel == "effects"
+
+
+def test_effect_settings_survive_a_round_trip(tmp_path: Path) -> None:
+    config = Config()
+    config.eq_enabled = True
+    config.eq_gains = [1.0, -2.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0]
+    config.spatial_amount = 0.42
+    save_config(config, tmp_path / "config.json")
+
+    restored = load_config(tmp_path / "config.json")
+    assert restored.eq_enabled is True
+    assert restored.eq_gains == config.eq_gains
+    assert restored.spatial_amount == 0.42
