@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import unicodedata
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -18,12 +19,16 @@ from typing import Any
 from aurora.core.models import AudioFormat, Track
 from aurora.core.paths import library_file
 
-#: 快取格式版本。改動 Track 欄位時要 +1，舊快取會被自動丟棄。
-_SCHEMA_VERSION = 1
+#: 快取格式版本。改動 Track 欄位或快取鍵格式時要 +1，舊快取會被自動丟棄。
+#:
+#: v2 將路徑統一成 NFC，避免 APFS 的 NFD 檔名與 Windows 的 NFC 檔名對同一首歌
+#: 產生不同快取鍵。
+_SCHEMA_VERSION = 2
 
 
 def _cache_key(path: Path, mtime: float, size: int) -> str:
-    return f"{str(path).lower()}|{int(mtime)}|{size}"
+    normalized_path = unicodedata.normalize("NFC", str(path)).lower()
+    return f"{normalized_path}|{int(mtime)}|{size}"
 
 
 def _track_to_dict(track: Track) -> dict[str, Any]:

@@ -224,6 +224,13 @@ def resolve_codec(
         return derive_hfp_codec(endpoint.effective_format, active)
 
     if endpoint.transport is TransportKind.BLUETOOTH_A2DP:
+        # A2DP 的對照表只描述 Windows 與其藍牙晶片能力；其他平台不能借用它猜測。
+        if context.windows_build <= 0:
+            return CodecInfo(
+                "未知",
+                Confidence.UNKNOWN,
+                ("非 Windows 主機沒有可用的 A2DP 編碼推定依據",),
+            )
         return infer_a2dp_codec(
             endpoint.friendly_name,
             endpoint.company_id,
