@@ -4,7 +4,7 @@
 先關粒子與色散（最貴、也最不影響可讀性），再降 bloom，最後才動模糊 ——
 模糊背景是這個介面的識別，寧可犧牲其他也要留著。
 
-「減少動態」預設跟隨 Windows 的協助工具設定。Apple HIG 與 Material Design
+「減少動態」預設跟隨系統的協助工具設定。Apple HIG 與 Material Design
 都把尊重這個設定列為硬性要求，不是選配。
 
 Signals
@@ -152,7 +152,7 @@ class MotionController(QObject):
 
     @Property(bool, notify=reduceMotionChanged)
     def reduceMotion(self) -> bool:
-        """使用者明確設定優先；沒設過就跟隨 Windows 的「動畫效果」偏好。"""
+        """使用者明確設定優先；沒設過就跟隨系統的「動畫效果」偏好。"""
         if self._config.reduce_motion is not None:
             return self._config.reduce_motion
         return not self._system_animations

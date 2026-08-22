@@ -85,6 +85,19 @@ def test_unknown_hfp_rate_is_reported_as_unknown(table: CodecTable) -> None:
     assert codec.confidence is Confidence.UNKNOWN
 
 
+def test_hfp_is_still_derived_without_windows_context(table: CodecTable) -> None:
+    """HFP 只依端點格式判定，不能因為主機不是 Windows 而降級。"""
+    endpoint = _endpoint(
+        name="AirPods Pro Hands-Free",
+        transport=TransportKind.BLUETOOTH_HFP,
+        sample_rate=16000,
+        channels=1,
+    )
+    codec = resolve_codec(endpoint, HostContext(0, INTEL), table)
+    assert codec.name == "mSBC"
+    assert codec.confidence is Confidence.DERIVED
+
+
 # ------------------------------------------------------------------ A2DP（推定）
 
 
@@ -147,6 +160,19 @@ def test_unknown_device_is_honest_about_uncertainty(table: CodecTable) -> None:
     assert codec.name == "SBC 或 AAC"
     assert codec.confidence is Confidence.INFERRED
     assert any("沒有這台裝置" in reason for reason in codec.reasons)
+
+
+def test_a2dp_is_unknown_without_windows_context(table: CodecTable) -> None:
+    """macOS 等非 Windows 平台不可套用 Windows A2DP 能力對照表。"""
+    endpoint = _endpoint(
+        name="AirPods Pro",
+        transport=TransportKind.BLUETOOTH_A2DP,
+        company_id=0x004C,
+    )
+    codec = resolve_codec(endpoint, HostContext(0, INTEL), table)
+    assert codec.name == "未知"
+    assert codec.confidence is Confidence.UNKNOWN
+    assert any("非 Windows" in reason for reason in codec.reasons)
 
 
 def test_model_match_beats_vendor_match(table: CodecTable) -> None:

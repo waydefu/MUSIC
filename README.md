@@ -4,9 +4,9 @@
   <img src="data/aurora-icon.png" width="128" alt="AURORA 應用程式圖示">
 </p>
 
-AURORA 是一款以封面、即時頻譜與沉浸式動效為核心的 Windows 桌面音樂播放器。介面使用 PySide6／Qt Quick 製作，播放層採用 miniaudio，並提供來源音質、頻譜截止、疑似假無損、削波與 Windows 音訊端點分析。
+AURORA 是一款以封面、即時頻譜與沉浸式動效為核心的桌面音樂播放器。介面使用 PySide6／Qt Quick 製作，播放層採用 miniaudio，並提供來源音質、頻譜截止、疑似假無損、削波與音訊端點分析。
 
-> 目前版本僅支援 Windows。Windows EXE 無法直接在 macOS 執行；MacBook 版本需要另外實作 macOS 音訊端點層，並在 macOS 上打包與測試。
+> Windows 提供 EXE 發行包；macOS 可從原始碼執行。Windows EXE 無法直接在 macOS 執行，macOS 尚未提供 app bundle、簽章或正式安裝包。
 
 ## 主要功能
 
@@ -24,7 +24,8 @@ AURORA 是一款以封面、即時頻譜與沉浸式動效為核心的 Windows �
 - 可調整介面字體大小，設定於下次啟動時保留
 - 同名 `.lrc` 歌詞載入與時間同步
 - 音質面板：來源格式、取樣率、位元深度、頻譜截止、削波與疑似轉檔提示
-- Windows Core Audio 端點與藍牙編碼能力推導
+- 音訊端點資訊：Windows Core Audio 與 macOS Core Audio
+- Windows 藍牙編碼能力推導（macOS 藍牙 codec 目前不做推定）
 
 ## 使用方式
 
@@ -99,15 +100,15 @@ Windows 10 之後不允許程式自行把自己設成預設處理常式（`UserC
 
 ### 環境需求
 
-- Windows x64
+- Windows x64，或 macOS（僅從原始碼執行）
 - Python 3.11
 - [uv](https://docs.astral.sh/uv/)
 
-目前主要驗證環境為 Windows 11 23H2（build 22631）。
+目前主要驗證環境為 Windows 11 23H2（build 22631）與 macOS；macOS 尚未提供可安裝的打包版。
 
-```powershell
+```text
 git clone https://github.com/waydefu/MUSIC.git
-Set-Location MUSIC
+cd MUSIC
 uv sync --dev
 uv run aurora
 ```
@@ -117,6 +118,30 @@ uv run aurora
 ```powershell
 $env:QT_QPA_PLATFORM = "offscreen"
 uv run aurora --validate-qml
+```
+
+macOS 的 zsh／bash 可改為：
+
+```sh
+QT_QPA_PLATFORM=offscreen uv run aurora --validate-qml
+```
+
+#### macOS：`.venv` 被標示為隱藏時
+
+若倉庫位於 iCloud 同步的「桌面」或「文件」資料夾，macOS 可能替 `.venv`
+內的 editable `.pth` 檔加上 hidden flag；Python 會略過該檔，導致
+`uv run aurora` 找不到 `aurora`。只在遇到這個錯誤時，改用非點開頭的環境名稱：
+
+```sh
+export UV_PROJECT_ENVIRONMENT=venv
+uv sync --dev
+uv run aurora
+```
+
+離屏驗證則為：
+
+```sh
+QT_QPA_PLATFORM=offscreen UV_PROJECT_ENVIRONMENT=venv uv run aurora --validate-qml
 ```
 
 ## 建置 Windows EXE
@@ -148,11 +173,18 @@ uv run aurora --validate-qml
 這些檢查**也會由 GitHub Actions 自動跑**（Windows 與 macOS 兩個 job，
 見 `.github/workflows/ci.yml`），本機執行只是為了快速回饋。
 
-目前品質基準（2026-08-22 實測）：
+macOS 的 mypy 要排除 Windows 專屬模組；以這行取代上面的 `uv run mypy`：
+
+```sh
+uv run mypy --exclude 'platform_win' --follow-imports=silent
+```
+
+目前品質基準（2026-08-22 於 Windows 實測）：
 
 - Ruff：通過
-- mypy：43 個來源檔通過
-- pytest：325 個測試通過
+- mypy：44 個來源檔通過
+- pytest：366 個測試通過、1 個跳過（`test_macos_platform.py` 的 Core Audio
+  測試只在 macOS 上跑，在 Windows 跳過是正確的）
 - QML 離屏載入：通過
 - Windows 打包版冷啟動：通過
 
@@ -161,7 +193,7 @@ CI 蓋不到、只能在實機做的：實際出聲的音訊測試、GUI 外觀�
 
 測試素材由 `tools/make_test_audio.py` 產生到 `tests/_generated/`（需要 `ffmpeg`，
 不進版控）。**素材不存在時相關測試會 skip 而不是失敗** —— 此時 `pytest` 會顯示
-270 passed、55 skipped，那不是完整的套件。
+311 passed、56 skipped，那不是完整的套件。
 
 標記為 `audio` 的三個測試會實際開啟音訊裝置（預設會跑，`-m "not audio"` 可排除）。
 `platform_win` 的測試則以 `sys.platform` 判斷，非 Windows 環境自動跳過。
@@ -185,7 +217,8 @@ src/aurora/
 ├── bridge/        # Python/QML 控制器、Qt 模型與背景 metadata 協調
 ├── core/          # 設定、常數與共用資料型別
 ├── library/       # 音樂掃描、metadata、封面與快取
-├── platform_win/  # Windows Core Audio 與藍牙資訊
+├── platform/      # 跨平台能力契約與各平台 adapter
+├── platform_win/  # Windows Core Audio 與藍牙實作細節
 └── qml/           # 主介面、面板、圖示與動效
 
 tests/             # 單元、整合及 Windows 音訊測試
@@ -202,8 +235,9 @@ data/              # 應用程式圖示與資料資源
 
 ## 已知平台限制
 
-- 目前音訊端點與藍牙裝置分析依賴 Windows Core Audio、Windows Registry 與 Win32 API。
-- macOS 與 Linux 尚未提供平台介面實作及正式安裝包。
+- Windows 的藍牙編碼資訊依賴 Core Audio、Windows Registry 與 Win32 API；macOS 目前不推定藍牙 codec，會降級為未知。
+- macOS 可從原始碼執行，但尚無 app bundle、簽章、正式安裝包或檔案關聯；檔案關聯需未來在 bundle 的 `Info.plist` 宣告。
+- Linux 尚未提供平台介面實作或正式安裝包。
 - 音質推估會受到母帶、濾波器、取樣率與編碼器設定影響，結果應視為分析提示。
 
 ## 授權
