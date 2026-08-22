@@ -199,18 +199,23 @@ def main() -> int:
     cover = cover_path.read_bytes()
     print(f"  cover.png             {len(cover) / 1024:.0f} KB")
 
-    # 每一條都明寫 -c:a，不要靠 ffmpeg 對副檔名的隱含預設。
+    # 每一條都明寫 -c:a，不要靠 ffmpeg 對副檔名的隱含預設。那個預設會隨
+    # 版本與建置選項漂移，而漂移的結果是 mutagen 讀不懂、錯誤訊息又離
+    # 現場很遠（實際踩過：macOS 上產出的 .ogg 讓 OggVorbis() 丟
+    # "no appropriate stream found"）。
     #
-    # 那個預設會隨版本與建置選項漂移：Windows 的 gyan build 把 .ogg 編成
-    # Vorbis，macOS 的 Homebrew build 卻編出別的串流，害 mutagen 的
-    # OggVorbis() 直接丟 "no appropriate stream found"（已在 macOS CI 上實際
-    # 踩過）。素材要在兩個平台產生出同樣的東西，編碼器就不能用猜的。
+    # Ogg 用**內建**的 vorbis 編碼器，不是 libvorbis。理由是可攜性：
+    # libvorbis 要 ffmpeg 編譯時外掛，而 Homebrew 的 ffmpeg 8.x 沒有帶
+    # （macOS CI 上得到 "Unknown encoder 'libvorbis'"）。內建的 vorbis
+    # 每個 build 都有，代價是它被標為實驗性，要加 -strict -2。
+    # 音質差一點無所謂 —— test.ogg 只用於解碼、標籤、封面與掃描測試，
+    # 沒有任何頻譜品質斷言（那些用 mp3 與 flac）。
     ffmpeg("-i", str(source), "-c:a", "libmp3lame", "-b:a", "128k",
            str(OUTPUT_DIR / "test_128k.mp3"))
     ffmpeg("-i", str(source), "-c:a", "libmp3lame", "-b:a", "320k",
            str(OUTPUT_DIR / "test_320k.mp3"))
     ffmpeg("-i", str(source), "-c:a", "flac", str(OUTPUT_DIR / "test.flac"))
-    ffmpeg("-i", str(source), "-c:a", "libvorbis", "-q:a", "6",
+    ffmpeg("-i", str(source), "-c:a", "vorbis", "-strict", "-2", "-q:a", "6",
            str(OUTPUT_DIR / "test.ogg"))
     # 假無損：128k MP3 再包成 FLAC，容器是無損但內容早就被砍過高頻了
     ffmpeg("-i", str(OUTPUT_DIR / "test_128k.mp3"), "-c:a", "flac",
