@@ -128,7 +128,10 @@ Item {
                 Row {
                     id: bandRow
                     width: parent.width
-                    height: 214
+                    // 跟著面板高度等比例縮放。全螢幕時面板高很多，固定高度會讓
+                    // 推桿縮在頂端、下面空一大片；夾住上下限則是避免小視窗時
+                    // 擠掉說明文字、或大螢幕上長到荒謬。
+                    height: Math.round(Math.max(214, Math.min(460, scroll.height * 0.46)))
                     spacing: 0
                     opacity: (root.controller && root.controller.eqEnabled) ? 1.0 : 0.4
 
@@ -153,6 +156,11 @@ Item {
                                 orientation: Qt.Vertical
                                 from: -root.limit
                                 to: root.limit
+                                // 一格 1 dB。沒有吸附時滑桿是連續的，但底下的數字
+                                // 用 toFixed(0) 顯示 —— 拉到 5.4 卻寫「+5」，
+                                // 畫面在說謊。吸附之後手感也有段落，不會一滑就過頭。
+                                stepSize: 1.0
+                                snapMode: Slider.SnapAlways
                                 enabled: root.controller ? root.controller.eqEnabled : false
                                 value: index < root.gains.length ? root.gains[index] : 0
 
@@ -294,6 +302,8 @@ Item {
                     width: parent.width
                     from: 0.0
                     to: 1.0
+                    stepSize: 0.05
+                    snapMode: Slider.SnapAlways
                     value: root.controller ? root.controller.spatialAmount : 0.0
                     onMoved: if (root.controller) root.controller.setSpatialAmount(value)
                 }

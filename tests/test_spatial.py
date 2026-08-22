@@ -63,6 +63,18 @@ def _make(amount: float) -> SpatialUpmix:
     return upmix
 
 
+def _widen_only(amount: float) -> SpatialUpmix:
+    """只開加寬、關掉距離機制。
+
+    ``side/mid`` 比值同時被兩個機制影響：加寬把 side 拉高，距離把 mid 壓低。
+    一個指標量兩個軸，測出來的東西就沒有意義 —— 加入距離機制時三條測試
+    同時紅燈，成因就是這個。所以驗加寬時把距離關掉，反之亦然。
+    """
+    upmix = _make(amount)
+    upmix.depth_db = 0.0
+    return upmix
+
+
 def _run(processor: SpatialUpmix, signal: FloatArray, block: int = BLOCK) -> FloatArray:
     out = signal.copy()
     step = block * CHANNELS
@@ -113,6 +125,7 @@ def test_perfect_reconstruction_when_the_renderer_is_neutral() -> None:
     upmix = _make(1.0)
     upmix.surround_level = 0.0
     upmix.width = 1.0
+    upmix.depth_db = 0.0  # 距離機制也要關掉才叫「中性」
 
     signal = _program(32768)
     output = _run(upmix, signal)
@@ -163,6 +176,65 @@ def test_diffuse_content_gets_wider() -> None:
     assert after_side > before_side
 
 
+def test_realistic_material_is_meaningfully_widened() -> None:
+    """**真實混音**（置中人聲 + 不相關殘響）要有可聽的展開。
+
+    這條是補測試盲點補出來的。原本只有 :func:`test_diffuse_content_gets_wider`，
+    用的是完全不相關的素材 —— 那種情況剛好繞過了問題，所以它一路是綠的，
+    而真實音樂上效果幾乎是零。
+
+    當時環繞路徑被乘了兩次閘門（``side × (1 − centre_weight)``），而 side
+    本身就已經是不相關的成分。真實素材大多相關，閘門中位數只有 0.19，
+    再加上隨機相位是以功率相加，最後只換到 0.7% 的側能量。
+
+    所以這裡斷言的是**倍率**而不是「有變大」—— 只看方向的斷言抓不到
+    「效果小到聽不出來」這種失敗。
+    """
+    signal = _program()
+    # 用 side/mid 比值而不是絕對 side 能量：距離機制帶了一個全域補償增益，
+    # 絕對量測會被它污染。比值對補償不變。距離本身則另外關掉，見 _widen_only。
+    assert _side_over_mid(_run(_widen_only(1.0), signal)[LATENCY * CHANNELS :])         / _side_over_mid(signal) > 1.15
+
+
+def test_amount_drives_a_real_depth_axis() -> None:
+    """**乾濕比必須改變 direct/reverberant 比，那才是「距離」。**
+
+    加這條之前，``centre + front_mid`` 恆等於 ``mid``，於是
+    ``dry_mid*(1-a) + wet_mid*a`` 也恆等於 ``mid`` —— 直達聲在任何 amount
+    下都一動也沒動。那條數學恆等式就是「有變寬但沒真的拉遠」的成因：
+    實測 D/R 從 0 到 100% 只變 −0.62 dB，而人耳判斷距離需要數 dB。
+
+    所以這裡斷言的是 **D/R 隨 amount 單調下降，且全開時足以察覺**。
+    只驗「聽起來有變」抓不到「機制根本不存在」。
+    """
+    signal = _program()
+    base_left, base_right = _channels_of(signal)
+    base = _rms((base_left + base_right) * 0.5) / _rms((base_left - base_right) * 0.5)
+
+    def depth_db(amount: float) -> float:
+        left, right = _channels_of(_run(_make(amount), signal)[LATENCY * CHANNELS :])
+        ratio = _rms((left + right) * 0.5) / _rms((left - right) * 0.5)
+        return 20.0 * float(np.log10(ratio / base))
+
+    steps = [depth_db(a) for a in (0.25, 0.5, 0.75, 1.0)]
+    assert steps == sorted(steps, reverse=True), f"D/R 沒有單調下降：{steps}"
+    assert steps[-1] < -3.0, f"全開的 D/R 變化只有 {steps[-1]:.2f} dB，察覺不到"
+
+
+def test_depth_does_not_hollow_out_the_centre() -> None:
+    """壓低直達是為了拉遠，不是為了把人聲挖掉。
+
+    距離機制只壓「置中」的成分，所以它天生就會動到人聲 —— 這條守住
+    分寸：人聲要留得住，而且不可以因此跑掉位置。
+    """
+    signal = _mono_content()
+    output = _run(_make(1.0), signal)[LATENCY * CHANNELS :]
+    left, right = _channels_of(output)
+
+    assert _correlation(left, right) > 0.95
+    assert _rms(output) > _rms(signal[: output.size]) * 0.85
+
+
 def test_bass_survives_mono_collapse() -> None:
     """**低頻不可以相位抵消。**
 
@@ -183,6 +255,71 @@ def test_bass_survives_mono_collapse() -> None:
 
     # 折成單聲道後的低頻能量不得低於原本的八成。
     assert _rms(folded) > _rms(reference) * 0.8
+
+
+def test_hard_panned_source_keeps_its_position() -> None:
+    """**硬左偏的樂器不可以漏到右聲道。**
+
+    這條是讀文獻後補的。只用 coherence 分不出「硬左偏的乾樂器」與「真正的
+    環境音」—— 兩者的 coherence 都是 0（實測 0.000 對 0.006）。把前者當成
+    後者去相關，它就會漏到另一個聲道，定位被抹散。修正前實測有 39.5% 的
+    能量跑到原本靜音的右聲道。
+
+    Avendaño 與 Jot 的 upmix 框架同時使用 inter-channel coherence 與
+    panning index，兩者缺一不可；章程 §1.3 從 Sennheiser 學到的
+    「mix intent preservation」講的是同一件事 —— 混音師把樂器擺在左邊
+    是有意圖的，處理器不該把它搬走。
+    """
+    rng = np.random.default_rng(5)
+    source = rng.standard_normal(65536) * 0.35
+    signal = _stereo(source, np.zeros_like(source))
+
+    output = _run(_make(1.0), signal)[LATENCY * CHANNELS :]
+    left, right = _channels_of(output)
+
+    # 右聲道原本是靜音，處理後洩漏不得超過左聲道的一成。
+    assert _rms(right) < _rms(left) * 0.1
+
+
+def test_bass_image_is_not_smeared_by_decorrelation() -> None:
+    """低頻不可以被隨機相位推散。
+
+    去相關器對低頻套隨機相位會讓低音聲像散掉 —— 內部研究文件稱之為
+    「low-frequency phase chaos」，並建議在去相關網路後做適度 high-pass。
+    實測未加護欄時 <200 Hz 的 side 能量被推高 1.09 倍。
+
+    注意這**不是**單聲道相容性問題：折單聲道拿到的是 mid，而環繞只動
+    side，所以 M/S 結構本身就保證了折疊安全。這條守的是立體聲下的
+    低音聚焦度。
+    """
+    t = np.arange(1 << 17, dtype=np.float64) / RATE
+    bass = np.sin(2 * np.pi * 80.0 * t) * 0.4
+    rng = np.random.default_rng(3)
+    signal = _stereo(
+        bass + rng.standard_normal(t.size) * 0.05,
+        bass * 0.85 + rng.standard_normal(t.size) * 0.05,
+    )
+
+    output = _run(_widen_only(1.0), signal)[LATENCY * CHANNELS :]
+
+    def low_side_over_mid(samples: FloatArray) -> float:
+        """低頻的 side/mid 比值。同樣要對全域補償增益不變。"""
+        left, right = _channels_of(samples)
+        freqs = np.fft.rfftfreq(left.size, 1.0 / RATE)
+        band = freqs < 200.0
+        side = np.abs(np.fft.rfft((left - right) * 0.5)[band]).sum()
+        mid = np.abs(np.fft.rfft((left + right) * 0.5)[band]).sum()
+        return float(side / max(mid, 1e-12))
+
+    # 跳過開頭一個 hop。串流最前面只有一個視窗參與重疊相加，那段的淡入會
+    # 讓比值偏高 —— 實測含暖機 1.049x、跳過後 0.995x，差異全部來自暖機而
+    # 不是去相關。這與 test_perfect_reconstruction 用同一個理由。
+    warmup = SPATIAL_HOP * CHANNELS
+    trimmed = output[warmup:]
+    ratio = low_side_over_mid(trimmed) / low_side_over_mid(
+        signal[warmup : warmup + trimmed.size]
+    )
+    assert ratio < 1.03, f"低頻 side 被推高 {ratio:.2f}x"
 
 
 def test_mono_input_does_not_collapse_to_silence() -> None:
@@ -231,16 +368,45 @@ def test_level_stays_close_when_engaged() -> None:
     assert abs(result.applied_gain_db) < 1.5
 
 
-def test_amount_scales_the_effect_monotonically() -> None:
-    """乾濕比要單調 —— 中間值的效果應該落在關與全開之間。"""
-    signal = _diffuse_content()
+def test_amount_maps_linearly_to_perceived_widening() -> None:
+    """乾濕比要**依聽感線性**，不只是單調遞增。
 
-    def side_energy(amount: float) -> float:
-        left, right = _channels_of(_run(_make(amount), signal)[LATENCY * CHANNELS :])
-        return _rms((left - right) * 0.5)
+    這條是改強的。原本只斷言 ``off < half < full`` —— 而那個弱斷言讓一個
+    真實的缺陷溜了過去：環繞副本是隨機相位、與原始 side 以功率相加，
+    側能量是 √(1+g²)。直接讓增益等於 amount 的話，滑桿拉到 50% 只走完
+    25.8% 的效果、25% 更只有 5.4%，前半段像壞掉一樣 —— 但它完全滿足
+    「單調遞增」。
 
-    off, half, full = side_energy(0.0), side_energy(0.5), side_energy(1.0)
-    assert off < half < full
+    **只看方向的斷言抓不到「刻度不成比例」。** 所以這裡量的是進度百分比。
+    """
+    signal = _program()
+    base = _side_over_mid(signal)
+
+    def progress(amount: float) -> float:
+        out = _run(_widen_only(amount), signal)[LATENCY * CHANNELS :]
+        return _side_over_mid(out) / base
+
+    full = progress(1.0)
+    assert full > 1.15  # 全開要有實質效果，否則下面的比例沒有意義
+
+    for amount in (0.25, 0.5, 0.75):
+        ratio = (progress(amount) - 1.0) / (full - 1.0)
+        assert abs(ratio - amount) < 0.1, f"amount={amount} 只走完 {ratio:.1%}"
+
+
+def _np_side(signal: FloatArray) -> np.ndarray:
+    left, right = _channels_of(signal)
+    return (left - right) * 0.5
+
+
+def _side_over_mid(signal: FloatArray) -> float:
+    """side/mid 比值。**對全域增益不變**，所以距離機制的補償不會污染它。
+
+    直接量絕對 side 能量會被補償增益帶著跑 —— 那是加入距離機制時真的
+    踩到的坑，三條測試同時紅燈。
+    """
+    left, right = _channels_of(signal)
+    return _rms((left - right) * 0.5) / max(_rms((left + right) * 0.5), 1e-12)
 
 
 # ------------------------------------------------------------------ 生命週期與整合

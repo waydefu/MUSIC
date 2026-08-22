@@ -170,23 +170,30 @@ $env:QT_QPA_PLATFORM = "offscreen"
 uv run aurora --validate-qml
 ```
 
+這些檢查**也會由 GitHub Actions 自動跑**（Windows 與 macOS 兩個 job，
+見 `.github/workflows/ci.yml`），本機執行只是為了快速回饋。
+
 macOS 的 mypy 要排除 Windows 專屬模組；以這行取代上面的 `uv run mypy`：
 
 ```sh
 uv run mypy --exclude 'platform_win' --follow-imports=silent
 ```
 
-目前品質基準：
+目前品質基準（2026-08-22 於 Windows 實測）：
 
 - Ruff：通過
-- mypy：33 個來源檔通過
-- pytest：209 個測試通過
+- mypy：44 個來源檔通過
+- pytest：366 個測試通過、1 個跳過（`test_macos_platform.py` 的 Core Audio
+  測試只在 macOS 上跑，在 Windows 跳過是正確的）
 - QML 離屏載入：通過
 - Windows 打包版冷啟動：通過
 
+CI 蓋不到、只能在實機做的：實際出聲的音訊測試、GUI 外觀、打包驗證，
+以及 callback 效能的權威數字（`tools/bench_callback.py --device`）。
+
 測試素材由 `tools/make_test_audio.py` 產生到 `tests/_generated/`（需要 `ffmpeg`，
 不進版控）。**素材不存在時相關測試會 skip 而不是失敗** —— 此時 `pytest` 會顯示
-157 passed、52 skipped，那不是完整的套件。
+311 passed、56 skipped，那不是完整的套件。
 
 標記為 `audio` 的三個測試會實際開啟音訊裝置（預設會跑，`-m "not audio"` 可排除）。
 `platform_win` 的測試則以 `sys.platform` 判斷，非 Windows 環境自動跳過。

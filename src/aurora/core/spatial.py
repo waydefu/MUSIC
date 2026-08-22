@@ -51,13 +51,21 @@ L/R 的相關性可以完全由 M/S 推出來（已驗證）::
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import numpy.typing as npt
 
 from aurora.core.constants import (
     SPATIAL_COHERENCE_SMOOTHING,
+    SPATIAL_DECORRELATION_HP_HZ,
+    SPATIAL_DEPTH_CURVE,
+    SPATIAL_DEPTH_DB,
     SPATIAL_FFT_SIZE,
     SPATIAL_HOP,
+    SPATIAL_MAKEUP_CEILING,
+    SPATIAL_MAKEUP_SMOOTHING,
+    SPATIAL_PANNING_KNEE,
     SPATIAL_SURROUND_LEVEL,
     SPATIAL_WIDTH,
 )
@@ -84,6 +92,7 @@ class SpatialUpmix:
         self._hop = hop
         self._amount = 0.0
         self._surround = SPATIAL_SURROUND_LEVEL
+        self._depth_db = SPATIAL_DEPTH_DB
         self._width = SPATIAL_WIDTH
         self._channels = 0
         self._ready = False
@@ -96,15 +105,24 @@ class SpatialUpmix:
         bins = fft_size // 2 + 1
         self._smoothed_m = np.zeros(bins)
         self._smoothed_s = np.zeros(bins)
+        self._smoothed_cross = np.zeros(bins)
+        self._makeup = 1.0
         # 固定的隨機相位當去相關器。固定而非時變，這樣不會產生飄移感。
         phase = np.random.default_rng(20260822).uniform(-np.pi, np.pi, bins)
         self._decorrelator = np.exp(1j * phase)
         self._decorrelator[0] = 1.0  # DC 不去相關，否則會產生直流偏移
         self._decorrelator[-1] = 1.0
 
+        self._lf_guard = np.ones(bins)
+        # 全部預先配置。先前這三個用 np.concatenate 每個 hop 增長一次 ——
+        # 那違反 dsp_graph 契約的規則 2（不得有可避免的穩態配置），而且
+        # 在 2880 框的回呼下每次要跑 5.6 個 hop，配置成本會被放大。
         self._pending = np.zeros((0, 2))
+        self._pending_len = 0
         self._overlap = np.zeros((fft_size, 2))
         self._emitted = np.zeros((0, 2))
+        self._emit_head = 0
+        self._emit_len = 0
 
     # ------------------------------------------------------------ 設定
 
@@ -131,6 +149,15 @@ class SpatialUpmix:
         self._surround = float(max(0.0, value))
 
     @property
+    def depth_db(self) -> float:
+        """全開時把置中直達成分壓低多少 dB。設 0 可關掉距離機制。"""
+        return self._depth_db
+
+    @depth_db.setter
+    def depth_db(self, value: float) -> None:
+        self._depth_db = float(min(0.0, value))
+
+    @property
     def width(self) -> float:
         """原始 side 成分的寬度倍率。1.0 = 不改變原本的立體聲寬度。"""
         return self._width
@@ -149,16 +176,36 @@ class SpatialUpmix:
         self._channels = channels
         # 只處理立體聲。單聲道沒有左右差可分析，多聲道不在 P1 範圍。
         self._ready = channels == 2
+
+        # 低頻護欄：去相關只作用在 SPATIAL_DECORRELATION_HP_HZ 以上。
+        # 隨機相位打在低頻會讓低音聲像散開（內部研究稱 low-frequency
+        # phase chaos），實測未加時 <200 Hz 的 side 能量被推高 1.09 倍。
+        # 用 raised-cosine 淡入而不是硬切，硬邊會在時域造成鈴振。
+        freqs = np.fft.rfftfreq(self._fft, d=1.0 / sample_rate)
+        low = SPATIAL_DECORRELATION_HP_HZ * 0.5
+        span = max(SPATIAL_DECORRELATION_HP_HZ - low, 1.0)
+        ramp = np.clip((freqs - low) / span, 0.0, 1.0)
+        self._lf_guard = 0.5 - 0.5 * np.cos(np.pi * ramp)
+
+        # 待處理緩衝要容得下「一次最大回呼 + 一個未滿的視窗」。
+        self._pending = np.zeros((max_frames + self._fft, 2))
+        # 輸出佇列要容得下預填的一個視窗、加上一次回呼可能產生的所有 hop。
+        self._emitted = np.zeros((self._fft + max_frames + self._hop, 2))
+
         self.reset()
 
     def reset(self) -> None:
-        self._pending = np.zeros((0, 2))
-        self._overlap = np.zeros((self._fft, 2))
+        self._pending_len = 0
+        self._overlap.fill(0.0)
         # 預填一整個視窗的靜音。不能用 self.latency_frames —— reset() 會在
         # prepare() 裡被呼叫，那時 amount 還沒設，屬性會回 0。
-        self._emitted = np.zeros((self._fft, 2))
+        self._emitted.fill(0.0)
+        self._emit_head = 0
+        self._emit_len = self._fft
         self._smoothed_m.fill(0.0)
         self._smoothed_s.fill(0.0)
+        self._smoothed_cross.fill(0.0)
+        self._makeup = 1.0
 
     @property
     def latency_frames(self) -> int:
@@ -182,39 +229,52 @@ class SpatialUpmix:
             return
 
         view = buf.reshape(frames, self._channels)
-        self._pending = np.concatenate([self._pending, view.astype(np.float64)])
+        if self._pending_len + frames > self._pending.shape[0]:
+            # 回呼比 prepare 宣告的還大時分批做，而不是在回呼裡重新配置。
+            step = self._pending.shape[0] - self._fft
+            for start in range(0, buf.size, step * self._channels):
+                self.process(buf[start : start + step * self._channels])
+            return
+        self._pending[self._pending_len : self._pending_len + frames] = view
+        self._pending_len += frames
 
-        while self._pending.shape[0] >= self._fft:
+        while self._pending_len >= self._fft:
             self._advance()
 
         # 預填保證了這裡永遠取得到，但仍留一條安全路徑：真的不夠時把靜音
         # 補在**前面**（等同多一點延遲），而不是補在後面 —— 補後面會把
         # 串流的時間順序打亂，那比多一點延遲糟糕得多。
-        if self._emitted.shape[0] >= frames:
-            wet = self._emitted[:frames]
-            self._emitted = self._emitted[frames:]
+        if self._emit_len >= frames:
+            view[:] = self._emitted[self._emit_head : self._emit_head + frames]
+            self._emit_head += frames
+            self._emit_len -= frames
         else:
-            have = self._emitted.shape[0]
-            wet = np.zeros((frames, 2))
-            wet[frames - have :] = self._emitted
-            self._emitted = self._emitted[have:]
-
-        view[:] = wet.astype(np.float32)
+            # 預填保證了這裡取得到，但仍留安全路徑：真的不夠時把靜音補在
+            # **前面**（等同多一點延遲），補在後面會打亂串流的時間順序。
+            have = self._emit_len
+            view[: frames - have] = 0.0
+            view[frames - have :] = self._emitted[self._emit_head : self._emit_head + have]
+            self._emit_head += have
+            self._emit_len = 0
 
     # ------------------------------------------------------------ 內部
 
     def _advance(self) -> None:
         """處理一個 STFT 框，並吐出一個 hop 的輸出。"""
-        block = self._pending[: self._fft]
-        self._pending = self._pending[self._hop :]
+        block = self._pending[: self._fft].copy()
+        # 就地左移而不是重新配置。
+        self._pending[: self._pending_len - self._hop] = self._pending[
+            self._hop : self._pending_len
+        ]
+        self._pending_len -= self._hop
 
         windowed = block * self._window[:, None]
         left, right = windowed[:, 0], windowed[:, 1]
         mid = np.fft.rfft((left + right) * 0.5, self._fft)
         side = np.fft.rfft((left - right) * 0.5, self._fft)
 
-        coherence = self._coherence(mid, side)
-        scene = self._build_scene(mid, side, coherence)
+        coherence, ambience = self._analyse(mid, side)
+        scene = self._build_scene(mid, side, coherence, ambience)
         out_mid, out_side = self._render_stereo(*scene, mid, side)
 
         synth_l = np.fft.irfft(out_mid + out_side, self._fft)
@@ -222,32 +282,80 @@ class SpatialUpmix:
         synth = np.stack([synth_l, synth_r], axis=1) * self._window[:, None]
 
         self._overlap += synth
-        self._emitted = np.concatenate([self._emitted, self._overlap[: self._hop]])
-        self._overlap = np.concatenate(
-            [self._overlap[self._hop :], np.zeros((self._hop, 2))]
+
+        # 輸出佇列：先把已消費的部分往前壓實，再附加新的一個 hop。
+        if self._emit_head + self._emit_len + self._hop > self._emitted.shape[0]:
+            self._emitted[: self._emit_len] = self._emitted[
+                self._emit_head : self._emit_head + self._emit_len
+            ]
+            self._emit_head = 0
+        tail = self._emit_head + self._emit_len
+        self._emitted[tail : tail + self._hop] = self._overlap[: self._hop]
+        self._emit_len += self._hop
+
+        # overlap 就地左移並把尾巴清零，取代 concatenate。
+        self._overlap[: -self._hop] = self._overlap[self._hop :]
+        self._overlap[-self._hop :] = 0.0
+
+    def _analyse(
+        self, mid: npt.NDArray[np.complex128], side: npt.NDArray[np.complex128]
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+        """算出每格的相關性與環境音權重。
+
+        回傳 ``(coherence, ambience_weight)``：
+
+        ``coherence`` ∈ −1..1
+            左右有多相似。1 = 置中，0 = 不相關。
+
+        ``ambience_weight`` ∈ 0..1
+            這一格有多「無方向」，由 panning index 導出。
+
+        **為什麼需要第二個量。** 只用 coherence 分不出「硬左偏的乾樂器」與
+        「真正的環境音」—— 兩者的 coherence 都是 0（實測 0.000 對 0.006）。
+        把硬左偏的樂器當環境音去相關，它就會漏到另一個聲道，定位被抹散。
+        實測未修正前，硬左偏素材有 39.5% 的能量跑到原本靜音的右聲道。
+
+        這正是文獻上的標準做法：Avendaño 與 Jot 的 upmix 框架同時使用
+        inter-channel coherence 與 panning index（similarity measure），
+        兩者缺一不可。章程 §1.3 從 Sennheiser 學到的
+        「mix intent preservation」講的也是同一件事 —— 混音師把樂器擺在
+        左邊是有意圖的，處理器不該把它搬走。
+
+        panning index 由已有的量推出來，不必額外做 FFT::
+
+            |L|² − |R|² = 4·Re(M·conj(S))
+            |L|² + |R|² = 2(|M|² + |S|²)
+            Δ = 2·Re(M·conj(S)) / (|M|² + |S|²)
+
+        Δ = ±1 是硬左／硬右，0 是置中或左右平衡。
+
+        **三個量都必須時間平滑。** 逐框的瞬時值抖動很大：未平滑時真環境音
+        的 |Δ| 量到 0.497，跟硬左偏的 1.0 分不太開；平滑後掉到 0.168，
+        差距變成 6 倍。而且不平滑的增益會讓穩定的人聲每 20 ms 被推一下，
+        聽起來像有東西在呼吸。
+        """
+        alpha = SPATIAL_COHERENCE_SMOOTHING
+        self._smoothed_m = alpha * self._smoothed_m + (1.0 - alpha) * np.abs(mid) ** 2
+        self._smoothed_s = alpha * self._smoothed_s + (1.0 - alpha) * np.abs(side) ** 2
+        self._smoothed_cross = alpha * self._smoothed_cross + (1.0 - alpha) * np.real(
+            mid * np.conj(side)
         )
 
-    def _coherence(
-        self, mid: npt.NDArray[np.complex128], side: npt.NDArray[np.complex128]
-    ) -> npt.NDArray[np.float64]:
-        """時間平滑的每格相關性，落在 −1..1。
-
-        一定要平滑。逐框的瞬時值抖動很大，直接拿去當增益會讓穩定的人聲
-        每 20 ms 就被推一下，聽起來像有東西在呼吸。
-        """
-        power_m = np.abs(mid) ** 2
-        power_s = np.abs(side) ** 2
-        alpha = SPATIAL_COHERENCE_SMOOTHING
-        self._smoothed_m = alpha * self._smoothed_m + (1.0 - alpha) * power_m
-        self._smoothed_s = alpha * self._smoothed_s + (1.0 - alpha) * power_s
-        total = self._smoothed_m + self._smoothed_s
-        return (self._smoothed_m - self._smoothed_s) / np.maximum(total, _EPS)
+        total = np.maximum(self._smoothed_m + self._smoothed_s, _EPS)
+        coherence = (self._smoothed_m - self._smoothed_s) / total
+        panning = np.abs(2.0 * self._smoothed_cross / total)
+        # 軟膝而不是線性。線性閘門會連「輕微偏位」的內容一起保護，而真實
+        # 混音本來就充滿各種偏位的樂器 —— 實測兩支 Dolby Atmos 測試片，
+        # 線性閘門平均只放行 48–66%，加寬因此幾乎聽不出來。需要保護的
+        # 其實只有硬定位（|Δ|→1）。
+        return coherence, np.clip(1.0 - panning**SPATIAL_PANNING_KNEE, 0.0, 1.0)
 
     def _build_scene(
         self,
         mid: npt.NDArray[np.complex128],
         side: npt.NDArray[np.complex128],
         coherence: npt.NDArray[np.float64],
+        ambience: npt.NDArray[np.float64],
     ) -> tuple[
         npt.NDArray[np.complex128],
         npt.NDArray[np.complex128],
@@ -266,9 +374,22 @@ class SpatialUpmix:
         centre_weight = np.clip(coherence, 0.0, 1.0)
         centre = mid * centre_weight
         front_mid = mid * (1.0 - centre_weight)
-        # 不相關的成分拿去做環繞，並用固定隨機相位去相關，
-        # 否則折回立體聲時它會塌回中間，等於什麼都沒做。
-        surround_side = side * (1.0 - centre_weight) * self._decorrelator
+
+        # 環繞餵的是 side 乘上**環境音權重**，不是乘 (1 − centre_weight)。
+        #
+        # 那是一道多餘且有害的閘門：side 已經就是「左右不相關」的成分，
+        # 再用相關性掐一次等於平方衰減。實測真實素材上這道閘門的中位數只有
+        # 0.19，而且因為環繞副本是隨機相位、以功率相加，0.12 的相對振幅只
+        # 換來 √(1+0.12²) ≈ 0.7% 的側能量 —— 效果等於零。
+        #
+        # 拿掉之後安全性質完全沒有退步，因為 **side 本身就是天然的閘門**：
+        # 純置中的內容 side 恆為 0，人聲與低頻自動被保護。實測（surround=1.0）
+        # 側能量 1.26x、人聲相關性仍為 1.000、低頻折單聲道 1.00x、瞬態集中 1.00。
+        # ambience 只在「硬定位」的格子上關閉（實測硬左偏 0.000），
+        # 真實混音上仍有 0.900、真環境音 0.834 —— 效果幾乎完整保留。
+        # 這與被移除的 coherence 閘門正好相反：那道閘門是在**相關內容**上
+        # 關閉，而相關內容就是音樂的大部分，所以它殺掉的是效果本身。
+        surround_side = side * ambience * self._lf_guard * self._decorrelator
         return centre, front_mid, surround_side
 
     def _render_stereo(
@@ -287,10 +408,53 @@ class SpatialUpmix:
 
         P2 的 HRTF renderer 會取代這個方法，場景建構那一步不動。
         """
-        wet_mid = centre + front_mid
-        wet_side = dry_side * self._width + surround_side * self._surround
         amount = self._amount
-        return (
-            dry_mid * (1.0 - amount) + wet_mid * amount,
-            dry_side * (1.0 - amount) + wet_side * amount,
-        )
+
+        # 乾濕比要**依聽感線性**，不能直接拿去乘增益。
+        #
+        # 環繞副本是隨機相位，與原始 side 以功率相加：側能量是 √(1+g²)。
+        # 直接讓 g = amount 的話這條曲線在低端幾乎是平的 —— 實測滑桿拉到
+        # 50% 只走完 25.8% 的效果、25% 更只有 5.4%，前半段像壞掉一樣。
+        #
+        # 所以反過來解：先決定「側能量要走到哪」，再回推需要多少增益。
+        peak = math.hypot(1.0, self._surround)      # 全開時的側能量比
+        target = 1.0 + amount * (peak - 1.0)        # 想要的線性進度
+        gain = math.sqrt(max(0.0, target * target - 1.0))
+
+        # 寬度是同相成分，本來就以振幅相加，線性內插即可。
+        width = 1.0 + (self._width - 1.0) * amount
+
+        # 距離機制：把**置中的直達成分**往後推，擴散成分不動。
+        #
+        # 在這之前 centre + front_mid 恆等於 mid，於是
+        # dry_mid*(1-a) + wet_mid*a 也恆等於 mid —— 直達聲在任何 amount 下
+        # 都一動也沒動。那條恆等式就是「聽起來沒有拉遠」的成因：
+        # 實測 D/R 從 0 到 100% 只變 −0.62 dB，遠低於可察覺門檻。
+        depth = 10.0 ** (self._depth_db * amount**SPATIAL_DEPTH_CURVE / 20.0)
+        wet_mid = centre * depth + front_mid
+
+        out_mid = dry_mid * (1.0 - amount) + wet_mid * amount
+        out_side = dry_side * width + surround_side * gain
+
+        # 響度補償：對 mid 與 side **等量**施加，所以總響度回到原本，
+        # 而 D/R 比保留下來。不補的話使用者會把「變小聲」誤認成「變遠」。
+        return self._compensate(out_mid, out_side, dry_mid, dry_side)
+
+    def _compensate(
+        self,
+        out_mid: npt.NDArray[np.complex128],
+        out_side: npt.NDArray[np.complex128],
+        dry_mid: npt.NDArray[np.complex128],
+        dry_side: npt.NDArray[np.complex128],
+    ) -> tuple[npt.NDArray[np.complex128], npt.NDArray[np.complex128]]:
+        """把總能量拉回處理前的水準，但不動 mid 與 side 的比例。"""
+        before = float(np.sum(np.abs(dry_mid) ** 2) + np.sum(np.abs(dry_side) ** 2))
+        after = float(np.sum(np.abs(out_mid) ** 2) + np.sum(np.abs(out_side) ** 2))
+        if after > _EPS and before > _EPS:
+            target = min(math.sqrt(before / after), SPATIAL_MAKEUP_CEILING)
+        else:
+            target = 1.0
+        # 平滑，否則逐框變動會聽成抽吸。
+        alpha = SPATIAL_MAKEUP_SMOOTHING
+        self._makeup = alpha * self._makeup + (1.0 - alpha) * target
+        return out_mid * self._makeup, out_side * self._makeup
