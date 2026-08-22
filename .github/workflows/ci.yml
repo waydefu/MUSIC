@@ -1,0 +1,110 @@
+# AURORA 的自動化 Gate。
+#
+# 為什麼這個檔案存在：維護者在 Windows、另一位開發者在 macOS，兩人都無法在
+# 本機驗證對方的平台。CI 不是為了省事，是這個組合下唯一能防止互相破壞的機制。
+# 詳見 PROJECT_PLAN.md 的「驗證不對稱」一節。
+#
+# 目前只有 windows job。macOS job 要等 platform 縫完成才加得上去 ——
+# 現在 bridge/quality.py 在模組層級 import platform_win，而後者 import
+# winreg 與 ctypes.wintypes，在 macOS 上連 import 都過不了。
+#
+# 刻意**不**放進 CI 的東西（見 PROJECT_PLAN.md §6.1）：
+#   * -m "audio" 的測試 —— runner 沒有音訊裝置
+#   * tools/build_exe.py --verify —— 慢，之後改用 tag／手動觸發
+#   * benchmark 的權威數字 —— hosted runner 是共用 VM，尾端數字不可信
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 同一個分支連續推送時，取消還在跑的舊 run。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # uv 會依 pyproject.toml 的 requires-python 自行取得 3.11。
+      - name: 安裝 uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: 同步相依
+        run: uv sync --dev
+
+      # ---------------------------------------------------------------- 測試素材
+      #
+      # tests/_generated/ 不進版控，要用 ffmpeg 現做。素材是確定性的
+      # （build_signal() 有固定種子），所以可以安全快取；快取命中時連
+      # ffmpeg 都不必裝。
+      #
+      # 快取 key 綁在產生器的內容雜湊上：改了 make_test_audio.py 就重做。
+
+      - name: 還原測試素材快取
+        id: fixtures
+        uses: actions/cache@v4
+        with:
+          path: tests/_generated
+          key: fixtures-${{ runner.os }}-${{ hashFiles('tools/make_test_audio.py') }}
+
+      # runner 映像檔沒有預裝 ffmpeg（2026-08 確認過 Windows2022-Readme），
+      # 但有 Chocolatey。
+      - name: 安裝 ffmpeg
+        if: steps.fixtures.outputs.cache-hit != 'true'
+        run: choco install ffmpeg -y --no-progress
+
+      # PYTHONUTF8：這個腳本會印中文，輸出被重導向時 Windows 會退回
+      # cp1252／cp950 然後丟 UnicodeEncodeError。
+      - name: 產生測試素材
+        if: steps.fixtures.outputs.cache-hit != 'true'
+        env:
+          PYTHONUTF8: "1"
+        run: uv run python tools/make_test_audio.py
+
+      # 這一步是防「綠燈但其實沒測到」。素材不存在時相關測試是 skip 而不是
+      # fail，所以少了素材整個套件會縮水卻依然全綠。寧可在這裡爆掉。
+      - name: 確認素材齊全
+        shell: bash
+        run: |
+          missing=0
+          for f in test.wav test.flac test.ogg test_128k.mp3 test_320k.mp3 \
+                   fake_lossless.flac cover.png test.lrc test_320k.lrc; do
+            if [ ! -s "tests/_generated/$f" ]; then
+              echo "缺少或為空：tests/_generated/$f"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || { echo "測試素材不完整，測試套件會靜默縮水。"; exit 1; }
+          echo "素材齊全。"
+
+      # ---------------------------------------------------------------- Gate
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      - name: mypy
+        run: uv run mypy
+
+      # -m "not audio" 排除會實際開啟音訊裝置的測試；runner 沒有音效卡。
+      # -rs 讓 skip 的原因出現在 log 裡 —— 大量 skip 是套件縮水的徵兆。
+      - name: pytest
+        run: uv run pytest -m "not audio" -rs
+
+      # Python 的 gate 一行 QML 都不看，這是唯一覆蓋 QML 的自動化檢查。
+      # 它只證明「載得起來」，不證明畫面正確。
+      - name: QML 離屏載入
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run aurora --validate-qml
