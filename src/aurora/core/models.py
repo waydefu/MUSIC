@@ -99,9 +99,27 @@ class Track:
         return self.artist or "未知演出者"
 
 
+#: 藍牙耳機的通話端點，名稱會被系統加上這些後綴之一。
+_HFP_NAME_SUFFIXES = (" hands-free ag audio", " hands-free", " hands free")
+
+
+def strip_hfp_suffix(name: str) -> str:
+    """去掉通話模式後綴，得到「同一支耳機」的比對基準。
+
+    公開而不是模組私有，因為兩個不同層都要用同一套規則：平台層拿它判定
+    transport，:class:`EndpointSnapshot` 拿它判定同一支耳機是否同時掛著
+    A2DP 與 HFP 端點。兩邊各寫一份遲早會不一致。
+    """
+    lowered = name.lower()
+    for suffix in _HFP_NAME_SUFFIXES:
+        if lowered.endswith(suffix):
+            return name[: -len(suffix)].strip()
+    return name.strip()
+
+
 @dataclass(frozen=True, slots=True)
 class EndpointInfo:
-    """一個 Windows 音訊輸出端點。"""
+    """一個音訊輸出端點。"""
 
     id: str
     friendly_name: str
@@ -118,6 +136,39 @@ class EndpointInfo:
     def effective_format(self) -> AudioFormat | None:
         """優先用裝置格式；沒有就退回共用混音格式。"""
         return self.device_format or self.mix_format
+
+
+@dataclass(frozen=True, slots=True)
+class EndpointSnapshot:
+    """某一瞬間的輸出裝置狀態。
+
+    這個型別是**平台中立**的：Windows 由 MMDevice／WASAPI 填，
+    macOS 由 Core Audio 填，上層拿到的是同一個型別。
+    住在 ``core/`` 而不是某個平台套件裡，是因為 ``platform/`` 的
+    adapter 契約要用它當回傳型別 —— 如果它住在 ``platform_win/``，
+    平台抽象層就會反過來依賴 Windows 模組，那就不是抽象了。
+
+    **不得**在這裡加任何平台專屬欄位。
+    """
+
+    default: EndpointInfo | None = None
+    active: tuple[EndpointInfo, ...] = ()
+
+    @property
+    def hfp_also_connected(self) -> bool:
+        """目前走 A2DP，但同一支耳機的通話端點也在線上。
+
+        這是實務上最常見的「音質突然變差」原因：某個程式開了麥克風，
+        系統就把耳機切成通話模式。提早告訴使用者可以省下很多困惑。
+        """
+        if self.default is None or self.default.transport is not TransportKind.BLUETOOTH_A2DP:
+            return False
+        base = strip_hfp_suffix(self.default.friendly_name).lower()
+        return any(
+            item.transport is TransportKind.BLUETOOTH_HFP
+            and strip_hfp_suffix(item.friendly_name).lower() == base
+            for item in self.active
+        )
 
 
 @dataclass(frozen=True, slots=True)

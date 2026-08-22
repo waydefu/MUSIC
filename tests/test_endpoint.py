@@ -12,16 +12,19 @@ import sys
 
 import pytest
 
-pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows 專屬")
+# 這裡必須用 allow_module_level 的 skip，不能只靠 pytestmark 的 skipif。
+#
+# skipif 只跳過「執行」，不阻止「import」—— 下面那幾行 module-level 的
+# platform_win import 在收集階段就會跑，而 btregistry 會 import winreg，
+# 在 macOS 上直接 ModuleNotFoundError，整個收集中斷。
+# 原本的 skipif 之所以看起來沒問題，只是因為以前沒有非 Windows 的 CI。
+if sys.platform != "win32":  # pragma: no cover
+    pytest.skip("Windows 專屬", allow_module_level=True)
 
-from aurora.core.btcodec import HostContext, RadioInfo, default_table, resolve_codec  # noqa: E402
-from aurora.core.models import TransportKind  # noqa: E402
-from aurora.platform_win.btregistry import BluetoothDevice, match_company_id  # noqa: E402
-from aurora.platform_win.endpoint import (  # noqa: E402
-    EndpointSnapshot,
-    classify_transport,
-    parse_wave_format,
-)
+from aurora.core.btcodec import HostContext, RadioInfo, default_table, resolve_codec
+from aurora.core.models import EndpointSnapshot, TransportKind
+from aurora.platform_win.btregistry import BluetoothDevice, match_company_id
+from aurora.platform_win.endpoint import classify_transport, parse_wave_format
 
 # --- 本機實際抓到的 PKEY_AudioEngine_DeviceFormat 位元組 -------------------
 # 註冊表版本前面多了 8 個位元組的標頭，COM 版本沒有。

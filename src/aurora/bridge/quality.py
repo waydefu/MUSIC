@@ -19,20 +19,19 @@ from __future__ import annotations
 from PySide6.QtCore import Property, QObject, QTimer, Signal
 
 from aurora.audio.engine import AudioEngine
-from aurora.core.btcodec import HostContext, default_table, resolve_codec
+from aurora.core.btcodec import default_table, resolve_codec
 from aurora.core.constants import ENDPOINT_POLL_MS
 from aurora.core.models import (
     CodecInfo,
     Confidence,
+    EndpointSnapshot,
     QualityReport,
     RolloffResult,
     Track,
     TransportKind,
 )
 from aurora.core.quality import build_report
-from aurora.platform_win.btregistry import radio_usb_vid
-from aurora.platform_win.endpoint import EndpointSnapshot, query_endpoints
-from aurora.platform_win.osinfo import windows_build
+from aurora.platform import adapter
 
 _UNKNOWN_CODEC = CodecInfo("未知", Confidence.UNKNOWN, ())
 
@@ -49,7 +48,7 @@ class QualityController(QObject):
         super().__init__(parent)
         self._engine = engine
         self._table = default_table()
-        self._context = HostContext(windows_build(), self._table.radio_for_vid(radio_usb_vid()))
+        self._context = adapter().host_context(self._table)
         self._snapshot = EndpointSnapshot()
         self._track: Track | None = None
         self._report = self._build()
@@ -139,7 +138,7 @@ class QualityController(QObject):
 
     def refresh_endpoint(self) -> None:
         """輪詢預設輸出端點。裝置或傳輸模式有變就通知 UI。"""
-        snapshot = query_endpoints()
+        snapshot = adapter().query_endpoints()
         previous = self._snapshot.default
         current = snapshot.default
         self._snapshot = snapshot

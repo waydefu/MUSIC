@@ -371,7 +371,7 @@ GitHub 的 runner 是共用 VM，鄰居噪音在 CPU-bound 微基準上造成的
 | bypass bit-identical | `np.array_equal` 對照未處理輸入 | 章程 §15 的 KPI |
 | latency 加總正確 | 對照各 processor 申報值 | R2 的基礎 |
 | graph 未降級 | 檢查 degraded 旗標為假 | 確保安全網沒被誤觸發 |
-| 數量級時間上限 | offline 模式，**設 10 倍餘裕** | 只抓「有人在 callback 裡放了檔案 I/O 或 O(n²)」這種等級的退化 |
+| 數量級時間上限 | offline 模式的 **p50**，設 10 倍餘裕 | 只抓「有人在 callback 裡放了檔案 I/O 或 O(n²)」這種等級的退化。**不可比 max**，理由見 §7.5 |
 
 第一條最重要：它把一個**統計性的、需要實體機器的效能問題**，
 轉換成一個**確定性的、CI 就能守住的結構問題**。
@@ -387,11 +387,57 @@ GitHub 的 runner 是共用 VM，鄰居噪音在 CPU-bound 微基準上造成的
 但**不可拿 Core Audio 的數字去對章程 §1.1 的 WASAPI 基準**。
 那組基準（48 kHz、60 ms deadline、2880 frames/callback）綁定特定機器與音訊子系統。
 
-### 7.4 架構期的硬性產出
+### 7.4 現況基線（已量測，VERIFIED）
 
-**S2 結束時必須有現況的 p99 數字。**
-章程列為 Critical 的 R1 到今天為止**一次都沒有量過**。
-這個數字會決定 Spatial P1 能不能純 Python 實作。
+S2 已完成。以下是 2026-08-22 在維護者的 Windows 機器上、
+`--device` 模式（真實 `PlaybackDevice` + Qt 事件迴圈 + 60 Hz 分析器 tick、
+靜音、4000 次回呼、丟棄前 200 次暖機）量到的數字：
+
+| 指標 | 時間 | 佔 deadline | §6.3 上限 | |
+|---|---|---|---|---|
+| mean | 0.319 ms | 0.53% | ≤10% | OK |
+| p50 | 0.237 ms | 0.39% | — | |
+| p95 | 0.614 ms | 1.02% | — | |
+| p99 | 1.881 ms | 3.13% | ≤25% | OK |
+| p99.9 | 2.762 ms | 4.60% | — | |
+| max | 3.570 ms | 5.95% | ≤50% | OK |
+
+環境：48 kHz、每次回呼 2880 frames、deadline 60.00 ms。
+量的是 `_process` 本身，**不含解碼**（解碼在 miniaudio 的產生器上游完成）。
+這與章程 §1.1 的定義一致，兩邊數字可直接對照。
+
+**三個結論：**
+
+1. **R1 的長尾是真的。** p99 是 p50 的 8 倍，max 是 15 倍。
+   Python 的 GIL／GC／OS 排程確實製造出明顯的重尾，這不是杞人憂天。
+2. **但餘裕非常大。** p99 只吃掉 3.13% 的預算，離 25% 的上限還有約 13 ms。
+   **目前沒有任何實測證據支持提早下沉 C++**，章程 §4 的 Measure Before
+   Optimize 在這裡的答案是「不要」。Spatial P1 純 Python 實作看起來可行。
+3. **記憶體壓力低。** 穩態下淨 block 增量 ≈ 0，而且量測窗內 gen0 回收
+   一次都沒觸發 —— 目前的回呼幾乎不製造垃圾。這是很好的起點，
+   也是 §7.2 那條檢查未來要守住的東西。
+
+### 7.5 一個意外發現：offline 的尾巴比 device 還糟
+
+規畫時假設 offline 模式「不準但堪用」。實測推翻了「堪用」的部分。
+
+同一台機器、同一份程式碼跑五次 offline：
+
+| | 五次的範圍 |
+|---|---|
+| p50 | 0.116 – 0.126 ms（**穩定**） |
+| max | 0.577 – 16.112 ms（**28 倍差距**） |
+
+而同一天的 device 模式 max 只有 3.570 ms。**「比較便宜」的量測模式產生了
+比真實情況更糟的尾巴。**
+
+原因：offline 用 `pump()` 全速推進，CPU 完全飽和，跟機器上其他東西搶；
+device 模式被音訊時鐘節流，每 60 ms 之間 CPU 是閒的。
+
+**這改變了 §7.2 的第五條檢查**：CI 的時間 tripwire 要比 **p50**，不能比 max。
+在專用實體機上尾巴都能差 28 倍，共用的 CI runner 只會更糟。
+
+這件事也把「效能數字不上 CI」從一個謹慎的判斷變成有實測支撐的結論。
 
 同時要記錄一個章程沒講的權衡：60 ms 的 deadline 來自
 [src/aurora/audio/engine.py](src/aurora/audio/engine.py) 的 `_BUFFER_MSEC`，
@@ -461,17 +507,64 @@ GitHub 的 runner 是共用 VM，鄰居噪音在 CPU-bound 微基準上造成的
 
 ---
 
+### 9.1 架構期實作紀錄（S1–S3b 已完成，VERIFIED）
+
+CI 兩個 job 全綠：
+
+| | Windows | macOS |
+|---|---|---|
+| ruff | 通過 | 通過 |
+| mypy | 37 檔 | 32 檔（排除 `platform_win`，見下） |
+| pytest `-m "not audio"` | 220 passed / 1 skipped | 195 passed / 1 skipped |
+| QML 離屏載入 | 通過 | 通過 |
+
+**macOS job 一上線就挖出四個既存缺陷**，全部屬於「以前沒有非 Windows CI
+所以沒人會踩到」。記在這裡，因為接手時很容易重犯：
+
+1. **`skipif` 不阻止 import。** `tests/test_endpoint.py` 原本有
+   `pytestmark = skipif(sys.platform != "win32")`，但那只跳過**執行**；
+   module-level 的 `platform_win` import 在**收集階段**照樣跑，於是
+   `import winreg` 讓整個收集中斷。正解是
+   `pytest.skip(..., allow_module_level=True)`。
+   **新增 Windows 專屬測試檔時要沿用這個寫法。**
+2. **不要依賴 ffmpeg 對副檔名的隱含編碼器。** 那個預設隨版本與建置漂移：
+   macOS 上產出的 `.ogg` 讓 mutagen 丟 "no appropriate stream found"。
+3. **Homebrew 的 ffmpeg 8.x 沒有 libvorbis。** 明寫 `-c:a libvorbis` 會得到
+   "Unknown encoder"。改用 ffmpeg **內建**的 `vorbis`（需 `-strict -2`）——
+   它不依賴外部函式庫，每個 build 都有。
+4. **macOS 的 mypy 要排除 `platform_win`。** typeshed 把 `winreg` 與
+   `ctypes.wintypes` 標為 win32 專屬，直接跑會冒出 41 個 `attr-defined`。
+   用 `--exclude 'platform_win' --follow-imports=silent`；已用注入真錯的
+   方式驗證這個組合仍抓得到其他檔案的問題，不是關掉檢查換綠燈。
+
+另有一條與 runner 有關的教訓：查 runner 能力要看 **run log 裡的 Image 欄位**，
+不要照 `windows-latest` / `macos-latest` 的字面猜。實際值是
+`windows-2025-vs2026` 與 `macos-26-arm64`，都不是照字面推得到的那個。
+
+**S4（DSP graph 縫）尚未開始**，它屬於軌道 A，不擋 macOS。
+
 ## 10. 分軌期的交接清單
 
-Mac 開發者加入時要一次交付給他，避免來回問：
+**架構期已完成，這份清單現在可以直接交出去。**
 
-1. `platform/` 的 Protocol 完整簽章（§4.4）與 Windows 實作作為參考範例
-2. macOS CI job 的預期綠燈範圍（§8.1）
-3. §8.3 的地雷清單
-4. **哪些檔案不該碰**：`platform_win/`（Windows 實作細節）、`audio/`、`core/dsp*`
-   ——這些屬於軌道 A，同時改會製造衝突
-5. AGENTS.md 的證據等級規則：結論要標 VERIFIED / CODE-ONLY /
-   MANUAL-VERIFICATION-REQUIRED / BLOCKED，不要寫「應該沒問題」
+1. **起點就是 `src/aurora/platform/macos.py`。** 它已經在，繼承
+   `NullAdapter`，每個能力都降級但不會壞。檔案的 docstring 就是實作指南：
+   逐一列出每個方法要對應哪個 macOS API、以及**哪些刻意不要做**
+   （`host_context` 與檔案關聯在本階段維持降級，理由都寫在裡面）。
+2. **參考範例**是 `platform/windows.py`，契約在 `platform/base.py`（§4.4）。
+3. **一次覆寫一個方法，每補一個推一次 CI。** 沒覆寫的自動降級，不會壞。
+   建議順序：`system_animations_enabled`（最簡單、且是無障礙硬性要求）
+   → `query_endpoints` → 其餘。
+4. **兩條硬限制**（也寫在 `macos.py` 的 docstring 裡）：
+   macOS 專屬的 import 一律放方法內部，不可放模組層級
+   （`tests/test_platform.py` 會在 Windows 上 import 這個檔案來驗契約）；
+   失敗一律降級不拋例外。
+5. **地雷清單**見 §8.3，**CI 已知的四個坑**見 §9.1。
+6. **哪些檔案不該碰**：`platform_win/`（Windows 實作細節）、`audio/`、
+   `core/dsp*`、`tools/bench_callback.py` —— 這些屬於軌道 A，同時改會衝突。
+7. **AGENTS.md 的證據等級規則**：結論要標 VERIFIED / CODE-ONLY /
+   MANUAL-VERIFICATION-REQUIRED / BLOCKED，不要寫「應該沒問題」。
+   他有實機，所以 §8.2 那幾條可以做到 VERIFIED。
 
 ---
 
