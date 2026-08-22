@@ -199,12 +199,22 @@ def main() -> int:
     cover = cover_path.read_bytes()
     print(f"  cover.png             {len(cover) / 1024:.0f} KB")
 
-    ffmpeg("-i", str(source), "-b:a", "128k", str(OUTPUT_DIR / "test_128k.mp3"))
-    ffmpeg("-i", str(source), "-b:a", "320k", str(OUTPUT_DIR / "test_320k.mp3"))
-    ffmpeg("-i", str(source), str(OUTPUT_DIR / "test.flac"))
-    ffmpeg("-i", str(source), "-q:a", "6", str(OUTPUT_DIR / "test.ogg"))
+    # 每一條都明寫 -c:a，不要靠 ffmpeg 對副檔名的隱含預設。
+    #
+    # 那個預設會隨版本與建置選項漂移：Windows 的 gyan build 把 .ogg 編成
+    # Vorbis，macOS 的 Homebrew build 卻編出別的串流，害 mutagen 的
+    # OggVorbis() 直接丟 "no appropriate stream found"（已在 macOS CI 上實際
+    # 踩過）。素材要在兩個平台產生出同樣的東西，編碼器就不能用猜的。
+    ffmpeg("-i", str(source), "-c:a", "libmp3lame", "-b:a", "128k",
+           str(OUTPUT_DIR / "test_128k.mp3"))
+    ffmpeg("-i", str(source), "-c:a", "libmp3lame", "-b:a", "320k",
+           str(OUTPUT_DIR / "test_320k.mp3"))
+    ffmpeg("-i", str(source), "-c:a", "flac", str(OUTPUT_DIR / "test.flac"))
+    ffmpeg("-i", str(source), "-c:a", "libvorbis", "-q:a", "6",
+           str(OUTPUT_DIR / "test.ogg"))
     # 假無損：128k MP3 再包成 FLAC，容器是無損但內容早就被砍過高頻了
-    ffmpeg("-i", str(OUTPUT_DIR / "test_128k.mp3"), str(OUTPUT_DIR / "fake_lossless.flac"))
+    ffmpeg("-i", str(OUTPUT_DIR / "test_128k.mp3"), "-c:a", "flac",
+           str(OUTPUT_DIR / "fake_lossless.flac"))
 
     tag_files(cover)
     (OUTPUT_DIR / "test.lrc").write_text(LRC, encoding="utf-8")
