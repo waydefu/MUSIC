@@ -73,6 +73,9 @@ class Config:
     eq_enabled: bool = False
     eq_gains: list[float] = field(default_factory=lambda: [0.0] * len(EQ_BAND_HZ))
     spatial_amount: float = 0.0
+    #: 耳機空間化（P2 HRTF renderer）。預設關閉 —— 它是給耳機用的，
+    #: 用喇叭聽會多一層不需要的處理。
+    binaural: bool = False
 
     # ---------------------------------------------------------- 序列化
 
@@ -137,6 +140,7 @@ class Config:
         ]
         self.eq_gains = gains if len(gains) == len(EQ_BAND_HZ) else [0.0] * len(EQ_BAND_HZ)
         self.spatial_amount = min(max(float(self.spatial_amount), 0.0), 1.0)
+        self.binaural = bool(self.binaural)
 
         self.window.width = max(720, int(self.window.width))
         self.window.height = max(480, int(self.window.height))

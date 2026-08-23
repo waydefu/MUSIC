@@ -75,6 +75,7 @@ class AudioFxController(QObject):
         # 就會歸零、使用者調好的曲線憑空消失。
         self._eq_enabled = config.eq_enabled
         self._spatial.amount = config.spatial_amount
+        self._spatial.binaural = config.binaural
         self._reflections.amount = config.spatial_amount
 
         self._rebuild()
@@ -134,6 +135,27 @@ class AudioFxController(QObject):
         self.eqChanged.emit()
 
     # ------------------------------------------------------------ 空間音效
+
+    @Property(bool, notify=spatialChanged)
+    def binauralEnabled(self) -> bool:
+        return self._spatial.binaural
+
+    @Slot(bool)
+    def setBinauralEnabled(self, enabled: bool) -> None:
+        if bool(enabled) == self._spatial.binaural:
+            return
+        self._spatial.binaural = bool(enabled)
+        self._config.binaural = self._spatial.binaural
+        self.spatialChanged.emit()
+
+    @Property(bool, notify=spatialChanged)
+    def hrtfIsMeasured(self) -> bool:
+        """目前用的是使用者匯入的實測資料，還是內建的合成頭部模型。
+
+        UI 必須照實顯示。合成模型沒有耳廓，做不出可靠的前後區分 ——
+        讓它冒充完成品，使用者只會覺得功能壞了。
+        """
+        return self._spatial.hrtf_is_measured
 
     @Property(float, notify=spatialChanged)
     def spatialAmount(self) -> float:
