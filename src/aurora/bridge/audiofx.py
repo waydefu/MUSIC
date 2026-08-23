@@ -18,6 +18,10 @@
 早期反射在空間音效之後：它要對**已經被拉遠的**訊號加反射，順序反過來
 就會對原始直達聲加反射，空間線索會互相矛盾。
 
+同一個理由，耳機空間化的三個設定（開關、profile、空間精準度）要**同時**
+轉發給空間音效與早期反射：直達聲走 HRTF 而反射走交叉餵送的話，兩者給的
+方向線索會互相打架。
+
 限幅器一定在最後（除了電表），因為它要兜住前面所有級加起來的峰值；
 電表在限幅器之後，因為它要代表**真正送出去的**訊號。這與章程 §6.1 的
 DSP graph 一致。
@@ -80,6 +84,12 @@ class AudioFxController(QObject):
         self._spatial.cue_strength = config.hrtf_accuracy
         self._spatial.binaural = config.binaural
         self._reflections.amount = config.spatial_amount
+        # 反射的 renderer 要與直達聲的一致，所以這三個設定要一起轉發。
+        # 分家的話會出現「直達聲走 HRTF、反射走交叉餵送」的組合，
+        # 兩者的空間線索互相矛盾，聽起來比兩邊都不開還糟。
+        self._reflections.hrtf_profile = config.hrtf_profile
+        self._reflections.cue_strength = config.hrtf_accuracy
+        self._reflections.binaural = config.binaural
 
         self._rebuild()
 
@@ -148,6 +158,7 @@ class AudioFxController(QObject):
         if bool(enabled) == self._spatial.binaural:
             return
         self._spatial.binaural = bool(enabled)
+        self._reflections.binaural = self._spatial.binaural
         self._config.binaural = self._spatial.binaural
         self.spatialChanged.emit()
 
@@ -186,6 +197,7 @@ class AudioFxController(QObject):
             return
         self._config.hrtf_profile = name
         self._spatial.hrtf_profile = name
+        self._reflections.hrtf_profile = name
         self.spatialChanged.emit()
 
     @Property(float, notify=spatialChanged)
@@ -198,6 +210,7 @@ class AudioFxController(QObject):
         if abs(value - self._spatial.cue_strength) < 1e-6:
             return
         self._spatial.cue_strength = value
+        self._reflections.cue_strength = self._spatial.cue_strength
         self._config.hrtf_accuracy = self._spatial.cue_strength
         self.spatialChanged.emit()
 
