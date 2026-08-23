@@ -69,7 +69,7 @@ from aurora.core.constants import (
     SPATIAL_SURROUND_LEVEL,
     SPATIAL_WIDTH,
 )
-from aurora.core.hrtf import HrtfFilters, synthetic_filters
+from aurora.core.hrtf import HrtfFilters, load_filters, synthetic_filters
 
 FloatArray = npt.NDArray[np.float32]
 
@@ -101,6 +101,7 @@ class SpatialUpmix:
         # 回呼成本與 P1 逐位元相同（§9.9 的預算決定因此不受影響）。
         self._binaural = False
         self._hrtf: HrtfFilters | None = None
+        self._hrtf_measured = False
         self._sample_rate = 0
 
         # sqrt-Hann 用於分析與合成。平方後就是 Hann，而 Hann 在 50% 重疊下
@@ -174,7 +175,25 @@ class SpatialUpmix:
     def binaural(self, value: bool) -> None:
         self._binaural = bool(value)
         if self._binaural and self._sample_rate:
-            self._hrtf = synthetic_filters(self._sample_rate, self._fft)
+            self._load_hrtf(self._sample_rate)
+
+    @property
+    def hrtf_is_measured(self) -> bool:
+        """目前用的是使用者自備的實測資料，還是內建的合成頭模型。
+
+        UI 要照實顯示這件事。合成模型沒有耳廓，做不出可靠的前後區分與真正
+        的頭外化 —— 讓它冒充「HRTF 已完成」會讓使用者以為功能壞了。
+        """
+        return self._hrtf_measured
+
+    def _load_hrtf(self, sample_rate: int) -> None:
+        """優先用實測資料，沒有或壞掉就退回合成模型。
+
+        ``load_filters`` 保證不拋例外：缺檔案是正常狀態，不是錯誤。
+        """
+        measured = load_filters(sample_rate, self._fft)
+        self._hrtf_measured = measured is not None
+        self._hrtf = measured or synthetic_filters(sample_rate, self._fft)
 
     @property
     def surround_level(self) -> float:
@@ -212,8 +231,13 @@ class SpatialUpmix:
     def prepare(self, sample_rate: int, channels: int, max_frames: int) -> None:
         self._channels = channels
         self._sample_rate = sample_rate
-        # 濾波器與 STFT 綁在同一個 fft_size 上，取樣率一變就得重算。
-        self._hrtf = synthetic_filters(sample_rate, self._fft) if self._binaural else None
+        # 濾波器與 STFT 綁在同一個 fft_size 上，取樣率一變就得重算 ——
+        # 實測 HRIR 也要跟著重新取樣，所以走同一條路。
+        if self._binaural:
+            self._load_hrtf(sample_rate)
+        else:
+            self._hrtf = None
+            self._hrtf_measured = False
         # 只處理立體聲。單聲道沒有左右差可分析，多聲道不在 P1 範圍。
         self._ready = channels == 2
 

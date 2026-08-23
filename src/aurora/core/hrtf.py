@@ -69,6 +69,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
@@ -76,10 +77,12 @@ import numpy.typing as npt
 from aurora.core.constants import (
     HEAD_RADIUS_M,
     HRTF_FRONT_AZIMUTH_DEG,
+    HRTF_MAX_TAP_RATIO,
     HRTF_SHADOW_MIN_GAIN,
     HRTF_SURROUND_AZIMUTH_DEG,
     SOUND_SPEED_MPS,
 )
+from aurora.core.paths import hrtf_file
 
 ComplexArray = npt.NDArray[np.complex128]
 
@@ -215,3 +218,86 @@ def interaural_delay_sec(azimuth_deg: float) -> float:
     """
     theta = min(math.radians(abs(azimuth_deg)), math.pi / 2)
     return (HEAD_RADIUS_M / SOUND_SPEED_MPS) * (theta + math.sin(theta))
+
+
+# ---------------------------------------------------------------- 實測資料
+
+#: 量測格點與目標方位角最多可以差幾度。資料集的格點通常是 5° 或更密，
+#: 差超過這個值就代表拿到的不是那個方向的響應，寧可退回合成模型。
+_AZIMUTH_TOLERANCE_DEG = 7.5
+#: ``.npz`` 裡必須有的欄位。
+_REQUIRED_KEYS = ("sample_rate", "azimuths", "ipsi", "contra")
+
+
+def _resample(response: npt.NDArray[np.float64], source_rate: int, target_rate: int) -> (
+    npt.NDArray[np.float64]
+):
+    """把脈衝響應換到另一個取樣率。
+
+    用傅立葉重取樣（``irfft(rfft(x), n=M)``），也就是理想的 sinc 內插。
+    線性內插在 10 kHz 附近就開始明顯滾降，而那正好是 HRTF 的方向線索所在。
+    HRIR 兩端本來就衰減到接近 0，所以這個方法隱含的週期性假設不會造成問題。
+    """
+    if source_rate == target_rate:
+        return response
+    length = max(1, round(response.size * target_rate / source_rate))
+    return np.asarray(np.fft.irfft(np.fft.rfft(response), n=length), dtype=np.float64)
+
+
+def load_filters(sample_rate: int, fft_size: int, path: Path | None = None) -> HrtfFilters | None:
+    """載入使用者自備的實測 HRTF。**任何問題都回傳 ``None``，不拋例外。**
+
+    退回 ``None`` 的意思是「用合成模型」，那是一個完全可用的狀態，不是錯誤。
+    這與設定檔／快取的處理原則相同（AGENTS.md 不變量 6）：壞掉的檔案只能
+    讓功能降級，不能讓播放器開不起來。
+
+    檔案由 ``tools/import_hrtf.py`` 產生，內容是**近耳／遠耳**的 HRIR
+    而不是左右耳 —— 左右哪一邊是近耳取決於喇叭在哪一側，轉換在匯入時
+    做掉一次，renderer 就不必知道資料集的座標慣例。
+    """
+    target = path or hrtf_file()
+    try:
+        if not target.is_file():
+            return None
+        with np.load(target) as data:
+            if any(key not in data for key in _REQUIRED_KEYS):
+                return None
+            source_rate = int(data["sample_rate"])
+            azimuths = np.asarray(data["azimuths"], dtype=np.float64)
+            ipsi = np.atleast_2d(np.asarray(data["ipsi"], dtype=np.float64))
+            contra = np.atleast_2d(np.asarray(data["contra"], dtype=np.float64))
+    except Exception:
+        # 檔案壞掉、不是 npz、numpy 版本不合 —— 一律當成沒有這個檔案。
+        return None
+
+    if source_rate <= 0 or ipsi.shape != contra.shape or ipsi.shape[0] != azimuths.size:
+        return None
+    if ipsi.shape[1] > fft_size * HRTF_MAX_TAP_RATIO:
+        # 太長的濾波器會在頻域相乘時繞回框首（見 HRTF_MAX_TAP_RATIO）。
+        return None
+
+    def pair_at(azimuth: float) -> tuple[ComplexArray, ComplexArray] | None:
+        # 資料集的量測格點不一定剛好落在 30°／110°，取最近的一個。
+        # 差太多就不要硬用 —— 那已經不是這個方位角的響應了。
+        index = int(np.argmin(np.abs(azimuths - azimuth)))
+        if abs(float(azimuths[index]) - azimuth) > _AZIMUTH_TOLERANCE_DEG:
+            return None
+        near = _resample(ipsi[index], source_rate, sample_rate)
+        far = _resample(contra[index], source_rate, sample_rate)
+        if near.size > fft_size or far.size > fft_size:
+            return None
+        return (
+            np.asarray(np.fft.rfft(near, n=fft_size), dtype=np.complex128),
+            np.asarray(np.fft.rfft(far, n=fft_size), dtype=np.complex128),
+        )
+
+    centre = pair_at(0.0)
+    front = pair_at(HRTF_FRONT_AZIMUTH_DEG)
+    surround = pair_at(HRTF_SURROUND_AZIMUTH_DEG)
+    if centre is None or front is None or surround is None:
+        return None
+
+    try:
+        return HrtfFilters.from_ear_pairs(centre=centre[0], front=front, surround=surround)
+    except ValueError:
+        return None
