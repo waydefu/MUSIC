@@ -83,6 +83,7 @@ import numpy.typing as npt
 
 from aurora.core.constants import (
     HEAD_RADIUS_M,
+    HRTF_CUE_SMOOTHING_OCTAVE,
     HRTF_EQ_LIMIT_DB,
     HRTF_EQ_SMOOTHING_OCTAVE,
     HRTF_FRONT_AZIMUTH_DEG,
@@ -196,6 +197,74 @@ class HrtfFilters:
             surround_diff=self.surround_diff * correction,
         )
 
+    def ear_responses(self) -> tuple[ComplexArray, ...]:
+        """拆回五條「喇叭到耳朵」的原始響應。
+
+        ``from_ear_pairs`` 的反運算：``ipsi = sum + diff``、``contra = sum − diff``
+        （每支各半的 0.5 在這裡剛好抵消）。頻譜線索住在**耳朵的響應**上，
+        不在 sum/diff 上，所以要動線索就得先拆回來。
+        """
+        return (
+            self.centre,
+            self.front_sum + self.front_diff,
+            self.front_sum - self.front_diff,
+            self.surround_sum + self.surround_diff,
+            self.surround_sum - self.surround_diff,
+        )
+
+    def with_cue_strength(self, strength: float) -> HrtfFilters:
+        """調整頻譜線索的強度。1.0 ＝ 原樣，0.0 ＝ 只留粗略輪廓。
+
+        ## 這在交換什麼
+
+        HRTF 的窄峰谷（主要來自耳廓）是**前後與上下**的線索，但它們是**那個
+        人**的耳朵形狀。非個人化 HRTF 的凹陷落在錯的頻率時，大腦不會把它讀
+        成方向，只會聽成「人聲的高頻怎麼不見了」—— 實測 H13 在正前方 8 kHz
+        比平均低 7.2 dB，回報的聽感就是「悶」。
+
+        Merimaa（Sennheiser）的 AES 研究做過同一件事：降低 HRTF 的頻譜起伏、
+        同時完整保留 ITD 與 ILD，在非個人化 HRTF 上音色染色顯著減少而定位
+        沒有統計顯著惡化。所以這是一個**準確度 ↔ 自然音色**的交換，
+        不是高頻等化。
+
+        ## 怎麼做到「保留 ITD 與 ILD」
+
+        對每條耳朵響應，把它的 magnitude 往**自己的**一八度平滑版本內插::
+
+            |H_soft| = |H_smooth| · (|H| / |H_smooth|) ** strength
+
+        粗略輪廓原封不動 ⇒ 寬頻的 ILD 保住；只有窄的峰谷被壓平。
+        相位完全不碰 ⇒ ITD 完全不變。
+        """
+        alpha = float(np.clip(strength, 0.0, 1.0))
+        if alpha >= 1.0:
+            return self
+
+        softened: list[ComplexArray] = []
+        for response in self.ear_responses():
+            magnitude = np.abs(response)
+            outline = _smooth_octaves(magnitude, HRTF_CUE_SMOOTHING_OCTAVE)
+            detail = np.divide(
+                magnitude, outline, out=np.ones_like(magnitude), where=outline > _EPS
+            )
+            # α=0 時這個式子恰好等於輪廓本身，α=1 時恰好等於原訊號 ——
+            # 兩端都是精確的，中間是對數域的線性內插。
+            target = outline * detail**alpha
+            scale = np.divide(
+                target,
+                np.maximum(magnitude, _EPS),
+                out=np.ones_like(magnitude),
+                where=magnitude > _EPS,
+            )
+            softened.append(response * scale)
+
+        centre, front_ipsi, front_contra, surround_ipsi, surround_contra = softened
+        return HrtfFilters.from_ear_pairs(
+            centre=centre,
+            front=(front_ipsi, front_contra),
+            surround=(surround_ipsi, surround_contra),
+        )
+
     def __post_init__(self) -> None:
         sizes = {
             self.centre.size,
@@ -208,7 +277,9 @@ class HrtfFilters:
             raise ValueError(f"五條濾波器長度必須相同，收到 {sizes}")
 
 
-def _smooth_octaves(magnitude: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+def _smooth_octaves(
+    magnitude: npt.NDArray[np.float64], octaves: float = HRTF_EQ_SMOOTHING_OCTAVE
+) -> npt.NDArray[np.float64]:
     """對數頻率上的分數八度平滑（能量平均）。
 
     用累積和一次算完，避免 1025 格各跑一次迴圈。第 0 格（DC）沒有八度可言，
@@ -217,7 +288,7 @@ def _smooth_octaves(magnitude: npt.NDArray[np.float64]) -> npt.NDArray[np.float6
     power = np.square(magnitude, dtype=np.float64)
     cumulative = np.concatenate(([0.0], np.cumsum(power)))
     index = np.arange(magnitude.size, dtype=np.float64)
-    ratio = 2.0 ** (HRTF_EQ_SMOOTHING_OCTAVE / 2.0)
+    ratio = 2.0 ** (octaves / 2.0)
     low = np.maximum(0, np.floor(index / ratio)).astype(np.int64)
     high = np.minimum(magnitude.size, np.ceil(index * ratio).astype(np.int64) + 1)
     width = np.maximum(high - low, 1)

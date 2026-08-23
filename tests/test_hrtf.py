@@ -20,12 +20,19 @@ import numpy as np
 import pytest
 
 from aurora.core.constants import (
+    HRTF_CUE_SMOOTHING_OCTAVE,
     HRTF_EQ_LIMIT_DB,
     HRTF_FRONT_AZIMUTH_DEG,
     HRTF_SURROUND_AZIMUTH_DEG,
     SPATIAL_FFT_SIZE,
 )
-from aurora.core.hrtf import HrtfFilters, ear_pair, interaural_delay_sec, synthetic_filters
+from aurora.core.hrtf import (
+    HrtfFilters,
+    _smooth_octaves,
+    ear_pair,
+    interaural_delay_sec,
+    synthetic_filters,
+)
 
 SAMPLE_RATE = 48000
 FFT = SPATIAL_FFT_SIZE
@@ -313,3 +320,112 @@ def test_layout_correction_never_boosts_beyond_the_limit() -> None:
     keep = np.abs(raw.centre) > 1e-6
     gain_db = 20 * np.log10(np.abs(equalised.centre[keep]) / np.abs(raw.centre[keep]))
     assert gain_db.max() <= HRTF_EQ_LIMIT_DB + 1e-6
+
+
+# ------------------------------------------------------------------ 頻譜線索強度
+
+
+def _ripple_db(response: np.ndarray) -> float:
+    """響應相對自身輪廓的起伏（標準差，dB）—— 這就是「頻譜線索」的量。"""
+    magnitude = np.abs(response)
+    outline = _smooth_octaves(magnitude, HRTF_CUE_SMOOTHING_OCTAVE)
+    band = (FREQS > 200.0) & (FREQS < 12000.0)
+    deviation = 20 * np.log10(np.maximum(magnitude, 1e-12) / np.maximum(outline, 1e-12))
+    return float(np.std(deviation[band]))
+
+
+def test_full_strength_changes_nothing() -> None:
+    """預設不柔化 —— 要不要拿定位換音色是使用者的選擇。"""
+    filters = synthetic_filters(SAMPLE_RATE, FFT)
+    assert filters.with_cue_strength(1.0) is filters
+
+
+def test_zero_strength_leaves_exactly_the_outline() -> None:
+    """α=0 時每條耳朵響應的 magnitude 必須**恰好**等於自己的輪廓。
+
+    兩端精確是這個內插的地基：α=1 是原訊號、α=0 是輪廓，中間是對數域的
+    線性內插。端點不精確的話，滑桿的兩端就不是它宣稱的東西。
+    """
+    filters = synthetic_filters(SAMPLE_RATE, FFT)
+    softened = filters.with_cue_strength(0.0)
+    band = (FREQS > 200.0) & (FREQS < 12000.0)
+    for original, result in zip(filters.ear_responses(), softened.ear_responses(), strict=True):
+        outline = _smooth_octaves(np.abs(original), HRTF_CUE_SMOOTHING_OCTAVE)
+        assert np.allclose(np.abs(result)[band], outline[band])
+
+
+def test_softening_never_touches_phase() -> None:
+    """相位不動 ⇒ ITD 不動。這是「保留 ITD」這個宣稱的唯一嚴格證明。
+
+    不要用起音位置去量 ITD 來驗這件事：脈衝形狀本來就會隨 magnitude 改變，
+    量出來的起音會飄，那是量測假象不是 ITD 變了（開發時真的被騙過一次）。
+    """
+    filters = synthetic_filters(SAMPLE_RATE, FFT)
+    for strength in (0.75, 0.5, 0.0):
+        softened = filters.with_cue_strength(strength)
+        for original, result in zip(
+            filters.ear_responses(), softened.ear_responses(), strict=True
+        ):
+            assert np.allclose(np.angle(original), np.angle(result))
+
+
+def test_critical_band_ild_is_preserved_exactly() -> None:
+    """臨界頻帶（輪廓）的 ILD 必須完全不變 —— 那是感知上有意義的 ILD 定義。
+
+    被柔化的只有細結構。輪廓帶著寬頻的左右音量差，動它就等於動方向。
+    """
+    filters = synthetic_filters(SAMPLE_RATE, FFT)
+    softened = filters.with_cue_strength(0.0)
+    band = (FREQS > 200.0) & (FREQS < 12000.0)
+
+    def outline_ild(near: np.ndarray, far: np.ndarray) -> np.ndarray:
+        smooth_near = _smooth_octaves(np.abs(near), HRTF_CUE_SMOOTHING_OCTAVE)
+        smooth_far = _smooth_octaves(np.abs(far), HRTF_CUE_SMOOTHING_OCTAVE)
+        return 20 * np.log10(smooth_near[band] / np.maximum(smooth_far[band], 1e-12))
+
+    original = outline_ild(filters.front_sum + filters.front_diff,
+                           filters.front_sum - filters.front_diff)
+    # α=0 之後 magnitude 就是輪廓本身，所以直接比它與原始輪廓的比值。
+    result = 20 * np.log10(
+        np.abs(softened.front_sum + softened.front_diff)[band]
+        / np.maximum(np.abs(softened.front_sum - softened.front_diff)[band], 1e-12)
+    )
+    assert np.allclose(original, result, atol=1e-9)
+
+
+def _with_notch(response: np.ndarray, hz: float, depth_db: float) -> np.ndarray:
+    """在響應上挖一個窄凹陷，模擬耳廓造成的頻譜線索。相位不動。"""
+    width = hz * 0.12
+    shape = np.exp(-(((FREQS - hz) / width) ** 2))
+    return response * (1.0 - (1.0 - 10 ** (depth_db / 20.0)) * shape)
+
+
+def test_synthetic_model_has_almost_nothing_to_soften() -> None:
+    """球形頭沒有耳廓，正前方的響應本來就是平滑的。
+
+    所以柔化它幾乎不會改變什麼 —— 這不是滑桿沒接上，是合成模型的先天限制
+    （也正是為什麼它做不出可靠的前後區分）。開發時曾經拿它當測試素材，
+    結果測到的是這件事而不是柔化本身。
+    """
+    filters = synthetic_filters(SAMPLE_RATE, FFT)
+    assert _ripple_db(filters.centre) < 0.05
+
+
+def test_cues_soften_monotonically() -> None:
+    """滑桿要有作用，而且方向要單調 —— 否則使用者調不出想要的位置。
+
+    素材是注入了已知凹陷的響應（真人 HRTF 的耳廓線索就長這樣）。不能用
+    合成模型驗，它根本沒有可柔化的細結構。
+    """
+    ipsi, contra = ear_pair(SAMPLE_RATE, FFT, HRTF_FRONT_AZIMUTH_DEG)
+    filters = HrtfFilters.from_ear_pairs(
+        centre=_with_notch(ear_pair(SAMPLE_RATE, FFT, 0.0)[0], 8000.0, -12.0),
+        front=(_with_notch(ipsi, 7000.0, -9.0), contra),
+        surround=ear_pair(SAMPLE_RATE, FFT, HRTF_SURROUND_AZIMUTH_DEG),
+    )
+
+    ripples = [
+        _ripple_db(filters.with_cue_strength(a).centre) for a in (1.0, 0.75, 0.5, 0.25, 0.0)
+    ]
+    assert ripples == sorted(ripples, reverse=True), f"起伏沒有單調下降：{ripples}"
+    assert ripples[-1] < ripples[0] * 0.5, "柔化到底卻幾乎沒變，滑桿等於沒接上"
