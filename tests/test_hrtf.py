@@ -20,6 +20,7 @@ import numpy as np
 import pytest
 
 from aurora.core.constants import (
+    HRTF_EQ_LIMIT_DB,
     HRTF_FRONT_AZIMUTH_DEG,
     HRTF_SURROUND_AZIMUTH_DEG,
     SPATIAL_FFT_SIZE,
@@ -190,7 +191,14 @@ def test_ms_shortcut_equals_per_speaker_rendering() -> None:
     # 環繞餵的是兩條互不相關的訊號，不是 ±u —— 推導必須對任意的一對成立。
     feed_sl, feed_sr = spectrum(), spectrum()
 
-    filters = synthetic_filters(SAMPLE_RATE, FFT)
+    # 刻意用**未補償**的濾波器組。佈局補償是每格一個共同的實數
+    #（由 test_layout_correction_is_a_common_real_scalar 守著），所以它與這裡要驗的
+    # M/S 代數可交換 —— 把它算進來只會讓失敗訊息更難讀，證不了更多東西。
+    filters = HrtfFilters.from_ear_pairs(
+        centre=ear_pair(SAMPLE_RATE, FFT, 0.0)[0],
+        front=ear_pair(SAMPLE_RATE, FFT, HRTF_FRONT_AZIMUTH_DEG),
+        surround=ear_pair(SAMPLE_RATE, FFT, HRTF_SURROUND_AZIMUTH_DEG),
+    )
     surround_sum = (feed_sl + feed_sr) * 0.5
     surround_diff = (feed_sl - feed_sr) * 0.5
     fast_mid = (
@@ -215,3 +223,93 @@ def test_shortcut_stays_a_handful_of_multiplies_per_bin() -> None:
     紅燈，預算也就跟著重測了（§9.10）。
     """
     assert len(dataclasses.fields(HrtfFilters)) == 5
+
+
+# ------------------------------------------------------------------ 佈局音色補償
+
+
+def _paths(filters: HrtfFilters) -> list[np.ndarray]:
+    """五條喇叭到耳朵的路徑。等化看的是它們的共同成分。"""
+    return [
+        filters.centre,
+        filters.front_sum + filters.front_diff,
+        filters.front_sum - filters.front_diff,
+        filters.surround_sum + filters.surround_diff,
+        filters.surround_sum - filters.surround_diff,
+    ]
+
+
+def test_layout_correction_is_a_common_real_scalar() -> None:
+    """等化必須是「每格一個共同的實數」。
+
+    這條看似瑣碎，但它是另外兩件事的地基：**共同** ⇒ 與 M/S 代數可交換
+    （所以化簡等價性可以在未等化的組上驗）；**實數** ⇒ 不動相位 ⇒ 不動 ITD。
+    哪天有人把等化寫成每條路徑各自處理、或不小心動到相位，方向就會歪掉，
+    而那用聽的只會覺得「怪」，很難定位到是這一步。
+    """
+    raw = HrtfFilters.from_ear_pairs(
+        centre=ear_pair(SAMPLE_RATE, FFT, 0.0)[0],
+        front=ear_pair(SAMPLE_RATE, FFT, HRTF_FRONT_AZIMUTH_DEG),
+        surround=ear_pair(SAMPLE_RATE, FFT, HRTF_SURROUND_AZIMUTH_DEG),
+    )
+    equalised = raw.layout_equalised()
+
+    before, after = _paths(raw), _paths(equalised)
+    # 只看兩邊都夠大的格，否則會拿 0/0 去比。
+    solid = np.all([np.abs(item) > 1e-6 for item in before], axis=0)
+    assert solid.sum() > FFT // 8, "可比較的格太少，這個測試會失去意義"
+
+    ratios = [(new[solid] / old[solid]) for old, new in zip(before, after, strict=True)]
+    for other in ratios[1:]:
+        assert np.allclose(other, ratios[0]), "不同路徑拿到不同的等化 ⇒ 會擾動 M/S 代數"
+    assert np.allclose(np.imag(ratios[0]), 0.0, atol=1e-9), "等化動到相位 ⇒ 會改掉 ITD"
+
+
+def test_layout_response_is_flattened() -> None:
+    """這個佈局的平均響應要被壓平 —— 那一段不帶任何方向資訊。
+
+    **補的是佈局不是資料集。** SADIE II 已經做過全球面的擴散場等化；
+    但 AURORA 只用到其中五個方向，那個子集的平均仍可能偏斜。未補償時實測
+    H13 相對 500 Hz 是 63 Hz −6.6 dB、8 kHz −4.0 dB，聽起來就是
+    「悶、沒有通透感、低頻不見」。
+    """
+    filters = synthetic_filters(SAMPLE_RATE, FFT)
+    common = np.sqrt(np.mean([np.abs(item) ** 2 for item in _paths(filters)], axis=0))
+
+    band = (FREQS >= 100.0) & (FREQS <= 12000.0)
+    spread_db = 20 * np.log10(common[band].max() / common[band].min())
+    assert spread_db < 6.0, f"共同響應仍有 {spread_db:.1f} dB 的起伏"
+
+
+def test_layout_correction_preserves_interaural_level_differences() -> None:
+    """ILD 是方向線索，等化不得動到它。
+
+    等化是共同純量，所以近耳／遠耳的**比值**必須逐位元不變。
+    """
+    raw = HrtfFilters.from_ear_pairs(
+        centre=ear_pair(SAMPLE_RATE, FFT, 0.0)[0],
+        front=ear_pair(SAMPLE_RATE, FFT, HRTF_FRONT_AZIMUTH_DEG),
+        surround=ear_pair(SAMPLE_RATE, FFT, HRTF_SURROUND_AZIMUTH_DEG),
+    )
+    equalised = raw.layout_equalised()
+
+    def ild(filters: HrtfFilters) -> np.ndarray:
+        near = filters.front_sum + filters.front_diff
+        far = filters.front_sum - filters.front_diff
+        keep = np.abs(far) > 1e-6
+        return np.abs(near[keep]) / np.abs(far[keep])
+
+    assert np.allclose(ild(raw), ild(equalised))
+
+
+def test_layout_correction_never_boosts_beyond_the_limit() -> None:
+    """量測在極低頻與極高頻不可靠，沒有上限的話會把噪訊放大成隆隆聲或嘶聲。"""
+    raw = HrtfFilters.from_ear_pairs(
+        centre=ear_pair(SAMPLE_RATE, FFT, 0.0)[0],
+        front=ear_pair(SAMPLE_RATE, FFT, HRTF_FRONT_AZIMUTH_DEG),
+        surround=ear_pair(SAMPLE_RATE, FFT, HRTF_SURROUND_AZIMUTH_DEG),
+    )
+    equalised = raw.layout_equalised()
+    keep = np.abs(raw.centre) > 1e-6
+    gain_db = 20 * np.log10(np.abs(equalised.centre[keep]) / np.abs(raw.centre[keep]))
+    assert gain_db.max() <= HRTF_EQ_LIMIT_DB + 1e-6

@@ -83,6 +83,8 @@ import numpy.typing as npt
 
 from aurora.core.constants import (
     HEAD_RADIUS_M,
+    HRTF_EQ_LIMIT_DB,
+    HRTF_EQ_SMOOTHING_OCTAVE,
     HRTF_FRONT_AZIMUTH_DEG,
     HRTF_MAX_TAP_RATIO,
     HRTF_SHADOW_MIN_GAIN,
@@ -140,6 +142,60 @@ class HrtfFilters:
             surround_diff=(surround_ipsi - surround_contra) * half,
         )
 
+    def layout_equalised(self) -> HrtfFilters:
+        """除掉**這個虛擬喇叭佈局**帶進來的共同音色偏差。
+
+        ## 這不是資料集的擴散場等化
+
+        好的 HRTF 資料集**已經做過**擴散場等化了。SADIE II 的做法是每耳取
+        全球面量測的能量平均、依**立體角加權**（避免密集取樣的方向被過度
+        代表）、再用 Kirkeby–Nelson 正則化求反濾波器，並在加窗前後各做一次。
+        AURORA **不重做**那件事，重做只會把已經平的東西再乘一次。
+
+        ## 那要補的是什麼
+
+        AURORA 只用到球面上的**五個方向**（中央、前方 ±30°、環繞 ±110°）。
+        資料集的全球面平均是平的，不代表這五個方向的平均也是平的 ——
+        實測 H13 這五條路徑的平均相對 500 Hz 是：63 Hz −6.6 dB、
+        125 Hz −6.4 dB、8 kHz −4.0 dB。那是**佈局本身**的音色偏差，
+        不帶任何方向資訊，卻整個乘在訊號上。實聽的結果就是
+        「變悶、沒有通透感、低頻不見」。
+
+        同一個群組（York）在 Ambisonic 雙耳渲染上也做過同樣的事：底層 HRTF
+        已經處理過，但經過解碼與虛擬喇叭組合之後仍會產生新的頻響偏差，
+        於是量**整個 renderer** 的響應再補回去。這裡是同一個道理。
+
+        ## 為什麼不會損失方向資訊
+
+        方向資訊全部藏在各方向之間的**差異**裡。這個修正是「每格一個共同的
+        實數」：共同 ⇒ 任兩個方向的比值不變（ILD 與相對頻譜形狀都保住），
+        實數 ⇒ 相位不動（ITD 不變）。兩者都有測試守著。
+        """
+        paths = np.stack(
+            [
+                self.centre,
+                self.front_sum + self.front_diff,
+                self.front_sum - self.front_diff,
+                self.surround_sum + self.surround_diff,
+                self.surround_sum - self.surround_diff,
+            ]
+        )
+        common = _smooth_octaves(np.sqrt(np.mean(np.abs(paths) ** 2, axis=0)))
+        reference = float(np.median(common))
+        if reference <= _EPS:
+            return self
+
+        limit = 10.0 ** (HRTF_EQ_LIMIT_DB / 20.0)
+        correction = np.clip(reference / np.maximum(common, _EPS), 1.0 / limit, limit)
+        # 只動 magnitude。相位帶著 ITD，碰它等於改掉方向。
+        return HrtfFilters(
+            centre=self.centre * correction,
+            front_sum=self.front_sum * correction,
+            front_diff=self.front_diff * correction,
+            surround_sum=self.surround_sum * correction,
+            surround_diff=self.surround_diff * correction,
+        )
+
     def __post_init__(self) -> None:
         sizes = {
             self.centre.size,
@@ -150,6 +206,24 @@ class HrtfFilters:
         }
         if len(sizes) != 1:
             raise ValueError(f"五條濾波器長度必須相同，收到 {sizes}")
+
+
+def _smooth_octaves(magnitude: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """對數頻率上的分數八度平滑（能量平均）。
+
+    用累積和一次算完，避免 1025 格各跑一次迴圈。第 0 格（DC）沒有八度可言，
+    照原值留著 —— 它只影響直流偏移。
+    """
+    power = np.square(magnitude, dtype=np.float64)
+    cumulative = np.concatenate(([0.0], np.cumsum(power)))
+    index = np.arange(magnitude.size, dtype=np.float64)
+    ratio = 2.0 ** (HRTF_EQ_SMOOTHING_OCTAVE / 2.0)
+    low = np.maximum(0, np.floor(index / ratio)).astype(np.int64)
+    high = np.minimum(magnitude.size, np.ceil(index * ratio).astype(np.int64) + 1)
+    width = np.maximum(high - low, 1)
+    smoothed = np.sqrt((cumulative[high] - cumulative[low]) / width)
+    smoothed[0] = magnitude[0]
+    return np.asarray(smoothed, dtype=np.float64)
 
 
 def ear_pair(
@@ -216,7 +290,7 @@ def synthetic_filters(sample_rate: int, fft_size: int) -> HrtfFilters:
         centre=centre,
         front=ear_pair(sample_rate, fft_size, HRTF_FRONT_AZIMUTH_DEG),
         surround=ear_pair(sample_rate, fft_size, HRTF_SURROUND_AZIMUTH_DEG),
-    )
+    ).layout_equalised()
 
 
 def interaural_delay_sec(azimuth_deg: float) -> float:
@@ -232,6 +306,8 @@ def interaural_delay_sec(azimuth_deg: float) -> float:
 
 # ---------------------------------------------------------------- 實測資料
 
+#: 避免除以零。
+_EPS = 1e-12
 #: 一對喇叭裡每一支承擔的份額。場景給一對的權重是 1，而 H_sum 在低頻
 #: 趨近 2·H_0，所以要各半才回到場景的能量分配。
 _PAIR_SHARE = 0.5
@@ -311,6 +387,7 @@ def load_filters(sample_rate: int, fft_size: int, path: Path | None = None) -> H
         return None
 
     try:
-        return HrtfFilters.from_ear_pairs(centre=centre[0], front=front, surround=surround)
+        filters = HrtfFilters.from_ear_pairs(centre=centre[0], front=front, surround=surround)
     except ValueError:
         return None
+    return filters.layout_equalised()
