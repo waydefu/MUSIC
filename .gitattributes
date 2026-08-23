@@ -1,5 +1,20 @@
 * text=auto eol=lf
+
+# Windows 會親自解讀這幾種檔案，而它們的解讀器都不接受 LF。
+#
+# .ps1 —— PowerShell 5.1 對 LF 其實還算寬容，但 BOM 是硬性的（見不變量 8）。
+# .bat —— cmd.exe 是真的會壞：它一邊用主控台代碼頁解碼、一邊用「位元組
+#         位移」記住讀到哪，LF 少了那個 CR 之後位置就對不回來，接下來每
+#         一行都從中間開始讀。0.2.0 的「安裝.bat」就是這樣整份跑掉的，
+#         使用者只看到滿畫面的「不是內部或外部命令」，什麼都沒裝到。
 *.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 隨發行壓縮檔一起送到使用者手上的純文字檔。使用者用記事本開，
+# 給它 Windows 原生的行尾。
+packaging/README.txt text eol=crlf
+
 *.png binary
 *.ico binary
 *.qsb binary

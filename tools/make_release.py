@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import zipfile
+from codecs import BOM_UTF8
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -50,21 +51,48 @@ def build() -> int:
     ).returncode
 
 
-def check_powershell_encoding() -> int:
-    """PowerShell 5.1 沒有 BOM 就用系統 ANSI 代碼頁讀 .ps1。
+def check_installer_encoding() -> int:
+    """使用者雙擊的兩支腳本，各自有一個「編碼錯了就完全跑不起來」的條件。
 
-    在繁體中文 Windows 上那是 cp950，腳本裡的中文會變成亂碼並讓解析器
-    直接失敗 —— 使用者看到的是一整頁 "Unexpected token" 而不是安裝畫面。
-    這個檢查擋住的就是這件事：實測過，少了 BOM 安裝腳本 100% 跑不起來。
+    ``.ps1`` —— PowerShell 5.1 沒有 BOM 就用系統 ANSI 代碼頁讀，在繁中
+    Windows 上那是 cp950，腳本裡的中文會變成亂碼並讓解析器直接失敗。
+    使用者看到的是一整頁 "Unexpected token" 而不是安裝畫面。
+
+    ``.bat`` —— 條件剛好相反，而且更嚴格：**不能有 BOM、不能有非 ASCII、
+    行尾必須 CRLF**。cmd.exe 一邊用主控台代碼頁解碼、一邊用位元組位移記住
+    讀到哪；只要出現多位元組字元、或少了 CR，兩個計數就對不回來，之後每
+    一行都從中間開始讀。BOM 則是另一種壞法 —— 它會把 ``@echo off`` 吃掉。
+
+    0.2.0 就是這樣出去的：``安裝.bat`` 被 ``.gitattributes`` 正規化成 LF，
+    在 zh-TW 主控台上整份跑掉，連 ``powershell`` 那一行都沒執行到，使用者
+    只看到滿畫面的「不是內部或外部命令」，什麼都沒裝到。當時這個檢查只看
+    ``.ps1``，所以完全沒擋住。
     """
     failures = 0
     for name in INSTALLER_FILES:
         source = PACKAGING / name
-        if source.suffix.lower() != ".ps1" or not source.exists():
+        if not source.exists():
             continue
-        if not source.read_bytes().startswith(b"\xef\xbb\xbf"):
-            print(f"  [error] {name} 缺少 UTF-8 BOM，PowerShell 5.1 會解析失敗")
-            failures += 1
+        raw = source.read_bytes()
+        suffix = source.suffix.lower()
+
+        if suffix == ".ps1":
+            if not raw.startswith(BOM_UTF8):
+                print(f"  [error] {name} 缺少 UTF-8 BOM，PowerShell 5.1 會解析失敗")
+                failures += 1
+        elif suffix in (".bat", ".cmd"):
+            if raw.startswith(BOM_UTF8):
+                print(f"  [error] {name} 不該有 UTF-8 BOM，cmd.exe 會吃掉第一行")
+                failures += 1
+            try:
+                raw.decode("ascii")
+            except UnicodeDecodeError:
+                print(f"  [error] {name} 含非 ASCII 字元，cmd.exe 會讀到行中間")
+                failures += 1
+            # 只驗「有沒有裸 LF」，不數 CR —— 檔案結尾可以沒有換行。
+            if raw.replace(b"\r\n", b"").count(b"\n"):
+                print(f"  [error] {name} 有 LF 行尾，必須是 CRLF")
+                failures += 1
     return failures
 
 
@@ -148,7 +176,7 @@ def main() -> int:
         print(f"找不到建置產物：{BUNDLE}")
         return 1
 
-    if check_powershell_encoding() != 0:
+    if check_installer_encoding() != 0:
         return 1
 
     stage_dir = stage()

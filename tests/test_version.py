@@ -55,3 +55,29 @@ def test_install_scripts_keep_their_utf8_bom() -> None:
     assert scripts, "packaging/ 裡找不到任何 .ps1"
     for script in scripts:
         assert script.read_bytes().startswith(b"\xef\xbb\xbf"), f"{script.name} 缺少 UTF-8 BOM"
+
+
+def test_installer_bat_stays_ascii_crlf_without_bom() -> None:
+    """使用者真正雙擊的是 .bat，而它的編碼規則跟 .ps1 剛好相反。
+
+    cmd.exe 一邊用主控台代碼頁解碼 .bat、一邊用**位元組位移**記住讀到哪。
+    出現多位元組字元、或行尾少了 CR，兩個計數就對不回來，之後每一行都從
+    中間開始讀；BOM 則是另一種壞法，它會把 ``@echo off`` 整個吃掉。
+
+    0.2.0 就是這樣發出去的：``.gitattributes`` 的 ``* text=auto eol=lf``
+    把「安裝.bat」正規化成 LF，於是在繁中主控台上整份跑掉，連 powershell
+    那一行都沒執行到 —— 使用者雙擊之後只看到滿畫面的「不是內部或外部命令」，
+    什麼都沒裝到。當時 ``make_release.py`` 的編碼檢查只看 ``.ps1``，
+    所以一路綠燈送到了 GitHub Releases。
+
+    這條在 CI 上跑，所以無論是有人手動改壞、還是 ``.gitattributes`` 的規則
+    又被改回去，當下就會紅。
+    """
+    scripts = sorted((ROOT / "packaging").glob("*.bat"))
+    assert scripts, "packaging/ 裡找不到任何 .bat"
+    for script in scripts:
+        raw = script.read_bytes()
+        assert not raw.startswith(b"\xef\xbb\xbf"), f"{script.name} 不該有 BOM"
+        raw.decode("ascii")  # 非 ASCII 會在這裡 UnicodeDecodeError
+        # 只驗「有沒有裸 LF」，不數 CR —— 檔案結尾可以沒有換行。
+        assert not raw.replace(b"\r\n", b"").count(b"\n"), f"{script.name} 有 LF 行尾"
