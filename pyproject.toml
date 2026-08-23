@@ -1,6 +1,6 @@
 [project]
 name = "aurora-player"
-version = "0.1.0"
+version = "0.2.0"
 description = "AURORA 極光播放器 — 封面沉浸式桌面音樂播放器"
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]

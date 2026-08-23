@@ -1665,9 +1665,23 @@ macOS 的檔案關聯靠 `Info.plist`，本階段不打包）。
      直接違反「使用者可見文案的來源是 `Strings.qml`」。要修就是把數值往上
      送、由 QML 組字串，屬跨層改動。
 
-2. **版本號停在 `0.1.0`，但距離 v0.1.0 tag 已經 77 個 commit。**
-   那個發行版**完全沒有** EQ、空間音效、HRTF。版本號因此不再描述樹上的東西，
-   任何「使用者回報 0.1.0 的 bug」都無法對應到程式碼。發行前必須 bump。
+2. ~~**版本號停在 `0.1.0`，但距離 v0.1.0 tag 已經 77 個 commit。**~~
+   **已處理**：發行 0.2.0 時 bump（當時已經 80 個 commit）。
+
+   處理過程中發現這一項的描述本身不完整。AGENTS.md 說版本的單一真相來源是
+   `src/aurora/__init__.py`，**實際上有兩份沒人看管的副本**：
+
+   * `pyproject.toml` —— 打包工具在 import 之前就要知道版本。
+   * `packaging/install.ps1` 的 `$version` —— 它在使用者機器上執行，那裡沒有
+     Python，而它寫進登錄檔的值會直接顯示在「應用程式與功能」裡。
+
+   副本無法避免（兩邊都讀不到 Python），能避免的是它們默默走鐘 ——
+   0.1.0 那次就是只有 `__version__` 被記得。改成由
+   [tests/test_version.py](tests/test_version.py) 釘住三者相等，**在 CI 上跑**；
+   `make_release.py` 的檢查只在發行時跑，抓不到平時的漂移。
+
+   同一支測試順便把「`packaging/*.ps1` 必須有 UTF-8 BOM」（不變量 8）也搬進
+   CI —— 原本只有 `make_release.py` 擋，等於要到發行當天才會發現存錯編碼。
 
 3. **實測 HRTF 的舊版單檔相容碼**（`paths.hrtf_file()` 與 `imported` profile）。
    單檔版與 profile 版都是 v0.1.0 之後才加的，**沒有任何已發行版本用過單檔

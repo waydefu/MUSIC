@@ -234,7 +234,7 @@ uv run mypy --exclude 'platform_win' --follow-imports=silent
 
 - Ruff：通過
 - mypy：45 個來源檔通過
-- pytest：479 個測試通過、1 個跳過（`test_macos_platform.py` 的 Core Audio
+- pytest：482 個測試通過、1 個跳過（`test_macos_platform.py` 的 Core Audio
   測試只在 macOS 上跑，在 Windows 跳過是正確的）
 - QML 離屏載入：通過
 - Windows 打包版冷啟動：通過
