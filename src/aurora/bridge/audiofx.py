@@ -179,7 +179,10 @@ class AudioFxController(QObject):
 
     @Slot(str)
     def setHrtfProfile(self, name: str) -> None:
-        if name == self._active_profile():
+        # 比的是**設定裡存的值**，不是解析後生效的那一組。沒有匯入任何資料時
+        # 「自動」解析出來就是合成模型，但明確選了合成模型仍然是一個要記住的
+        # 選擇 —— 之後匯入資料時「自動」會跑掉，明確選的不會。
+        if name == self._config.hrtf_profile:
             return
         self._config.hrtf_profile = name
         self._spatial.hrtf_profile = name
