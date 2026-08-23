@@ -25,6 +25,7 @@ flowchart LR
     Graph --> Reflect["core/reflections.py<br/>早期反射"]
     Graph --> Dyn["core/dynamics.py<br/>限幅器與輸出電表"]
     Spatial --> Hrtf["core/hrtf.py<br/>HRTF 濾波器組"]
+    Reflect --> Hrtf
 
     Player --> Fx["bridge/audiofx.py<br/>音效 ViewModel"]
     Fx --> Graph
@@ -57,7 +58,7 @@ flowchart LR
 | 回呼上的處理器級聯、掛載與降級 | DSP graph | `src/aurora/core/dsp_graph.py` |
 | 等化器、限幅器、輸出電表 | 純邏輯處理器 | `src/aurora/core/eq.py`, `dynamics.py` |
 | 虛擬 5.1、距離感、立體聲／HRTF renderer | Spatial | `src/aurora/core/spatial.py` |
-| 早期反射 | Reflections | `src/aurora/core/reflections.py` |
+| 早期反射（立體聲／雙耳兩條 renderer） | Reflections | `src/aurora/core/reflections.py` |
 | HRTF 濾波器、實測資料載入、頻譜線索強度 | HRTF | `src/aurora/core/hrtf.py` |
 | 音效面板的接線與設定持久化 | 音效 ViewModel | `src/aurora/bridge/audiofx.py` |
 | 端點、藍牙、檔案關聯、系統偏好 | **平台契約** | `src/aurora/platform/`（上層只認識這裡） |

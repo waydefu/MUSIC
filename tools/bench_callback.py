@@ -270,6 +270,10 @@ def install_chain(engine: AudioEngine, chain: str, binaural: bool = False) -> No
         equalizer.set_gains([EQ_GAIN_LIMIT_DB] * len(EQ_BAND_HZ))
         upmix.amount = 1.0
         reflections.amount = 1.0
+        # 反射的 renderer 也要跟著切。只切直達聲的話 --binaural 量到的是
+        # 「雙耳直達 + 立體聲反射」——那個組合播放器不會產生，量它等於
+        # 低估雙耳鏈的成本。
+        reflections.binaural = binaural
         return
     raise ValueError(f"未知的 chain：{chain}")
 
@@ -414,7 +418,9 @@ def main(argv: list[str] | None = None) -> int:
         "--binaural",
         action="store_true",
         help=(
-            "Spatial 改用 P2 的 HRTF renderer（只影響 spatial 與 full）。"
+            "改用 P2 的 HRTF renderer（只影響 spatial 與 full）。full 會連"
+            "早期反射一起切換——播放器不會產生「雙耳直達 + 立體聲反射」"
+            "那種組合，只切一半等於低估成本。"
             "用來回答 §9.9 要求的「P2 之前重新檢視預算」。"
         ),
     )
