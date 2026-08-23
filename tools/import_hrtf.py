@@ -61,7 +61,7 @@ from aurora.core.constants import (
     HRTF_FRONT_AZIMUTH_DEG,
     HRTF_SURROUND_AZIMUTH_DEG,
 )
-from aurora.core.paths import hrtf_file
+from aurora.core.paths import hrtf_dir, hrtf_file
 
 FloatArray = npt.NDArray[np.float64]
 
@@ -237,7 +237,14 @@ def main(argv: list[str] | None = None) -> int:
             "聲音），只有量不出來或互相矛盾時才需要指定。"
         ),
     )
-    parser.add_argument("--out", type=Path, help=f"輸出路徑（預設 {hrtf_file()}）")
+    parser.add_argument(
+        "--name",
+        help=(
+            "存成具名的 profile（放進 HRTF 資料夾）。匯入多組耳朵做 A/B 時用這個，"
+            "例如 --name ku100。不給的話寫到舊版的單檔位置。"
+        ),
+    )
+    parser.add_argument("--out", type=Path, help="輸出路徑。指定了就蓋過 --name。")
     options = parser.parse_args(argv)
 
     sources: dict[float, Path] = {}
@@ -264,7 +271,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"轉換失敗：{error}", file=sys.stderr)
         return 1
 
-    out = options.out or hrtf_file()
+    if options.out is not None:
+        out = options.out
+    elif options.name:
+        out = hrtf_dir() / f"{options.name}.npz"
+    else:
+        out = hrtf_file()
     out.parent.mkdir(parents=True, exist_ok=True)
     np.savez(out, **payload)
 

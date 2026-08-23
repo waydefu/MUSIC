@@ -33,6 +33,7 @@ from aurora.core.constants import EQ_BAND_HZ, EQ_GAIN_LIMIT_DB
 from aurora.core.dsp_graph import AudioProcessor
 from aurora.core.dynamics import Limiter, OutputMeter
 from aurora.core.eq import GraphicEqualizer, band_label
+from aurora.core.hrtf import SYNTHETIC_PROFILE, available_profiles
 from aurora.core.reflections import EarlyReflections
 from aurora.core.spatial import SpatialUpmix
 
@@ -75,6 +76,7 @@ class AudioFxController(QObject):
         # 就會歸零、使用者調好的曲線憑空消失。
         self._eq_enabled = config.eq_enabled
         self._spatial.amount = config.spatial_amount
+        self._spatial.hrtf_profile = config.hrtf_profile
         self._spatial.binaural = config.binaural
         self._reflections.amount = config.spatial_amount
 
@@ -146,6 +148,40 @@ class AudioFxController(QObject):
             return
         self._spatial.binaural = bool(enabled)
         self._config.binaural = self._spatial.binaural
+        self.spatialChanged.emit()
+
+    @Property(list, notify=spatialChanged)
+    def hrtfProfiles(self) -> list[str]:
+        """可選的 profile。第一項永遠是內建合成模型，之後是使用者匯入的。
+
+        把合成模型列成明確的選項，是因為「真人資料到底有沒有比較好」只能
+        靠 A/B 回答 —— 沒有這個選項就比不了。
+        """
+        return [SYNTHETIC_PROFILE, *available_profiles()]
+
+    def _active_profile(self) -> str:
+        """設定裡的「自動」解析成實際生效的那一組。
+
+        寫成方法而不是從別處讀 Property：Qt 的 Property 在型別檢查眼裡不是
+        字串，跨方法讀它會得到看不懂的錯誤。
+        """
+        chosen = self._config.hrtf_profile
+        if chosen:
+            return chosen
+        profiles = available_profiles()
+        return profiles[0] if profiles else SYNTHETIC_PROFILE
+
+    @Property(str, notify=spatialChanged)
+    def hrtfProfile(self) -> str:
+        """目前實際生效的 profile 名稱。"""
+        return self._active_profile()
+
+    @Slot(str)
+    def setHrtfProfile(self, name: str) -> None:
+        if name == self._active_profile():
+            return
+        self._config.hrtf_profile = name
+        self._spatial.hrtf_profile = name
         self.spatialChanged.emit()
 
     @Property(bool, notify=spatialChanged)

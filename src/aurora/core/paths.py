@@ -85,8 +85,25 @@ def hrtf_file() -> Path:
     檔案不存在時 HRTF renderer 自動退回合成頭模型，不是錯誤狀態。
 
     由 ``tools/import_hrtf.py`` 從資料集的 WAV 轉出來。
+
+    **這是舊版的單檔位置。** 現在可以放多組（見 :func:`hrtf_dir`），
+    這個路徑保留是為了讓已經匯入過的使用者不會突然失去他的資料。
     """
     return app_data_dir() / "hrtf.npz"
+
+
+def hrtf_dir() -> Path:
+    """使用者的 HRTF profile 資料夾，一個 ``.npz`` 就是一組耳朵。
+
+    **為什麼要多組。** HRTF 是「某一個人的頭與耳朵」的量測，別人的資料
+    套在自己身上不一定合 —— SADIE II 自己的聽感研究裡沒有任何受試者把
+    自己的 HRTF 評為最喜歡，81% 反而偏好 KU100 這顆刻意做成平均人類的
+    假人頭。所以正確的做法不是猜一組最好的，是讓使用者盲聽自己挑。
+
+    呼叫時**不**建立目錄：沒有這個資料夾是正常狀態（代表還沒匯入過），
+    建立空目錄只會讓人以為東西壞了。
+    """
+    return app_data_dir() / "hrtf"
 
 
 def covers_dir() -> Path:

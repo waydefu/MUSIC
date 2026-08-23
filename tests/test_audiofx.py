@@ -270,3 +270,16 @@ def test_binaural_reports_the_synthetic_model_without_imported_data(fx: object) 
     controller, _, _ = fx
     controller.setBinauralEnabled(True)
     assert not controller.hrtfIsMeasured
+
+
+def test_synthetic_is_always_offered_as_a_profile(fx: object) -> None:
+    """A/B 需要一個明確的對照組，所以內建模型必須永遠在清單裡的第一個。"""
+    controller, _, _ = fx
+    assert controller.hrtfProfiles[0] == "synthetic"
+
+
+def test_choosing_a_profile_reaches_the_config(fx: object) -> None:
+    controller, _, config = fx
+    controller.setHrtfProfile("synthetic")
+    assert config.hrtf_profile == "synthetic"
+    assert controller.hrtfProfile == "synthetic"

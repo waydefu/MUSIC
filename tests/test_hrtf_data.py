@@ -300,3 +300,78 @@ def test_common_propagation_delay_is_removed(tmp_path: Path) -> None:
     filters = load_filters(RATE, FFT, out)
     assert filters is not None
     assert _ear_delay_samples(filters) == itd
+
+
+# ------------------------------------------------------------------ Profile
+
+
+def _install(directory: Path, name: str, monkeypatch) -> Path:
+    """把一組合成的 HRTF 裝成具名 profile。"""
+    root = directory / "profiles"
+    root.mkdir(exist_ok=True)
+    monkeypatch.setattr(hrtf_module, "hrtf_dir", lambda: root)
+    monkeypatch.setattr(hrtf_module, "hrtf_file", lambda: directory / "legacy.npz")
+    source = directory / name
+    source.mkdir()
+    out = root / f"{name}.npz"
+    assert _convert(_dataset(source), out) == 0
+    return out
+
+
+def test_profiles_are_listed_by_name(tmp_path: Path, monkeypatch) -> None:
+    _install(tmp_path, "ku100", monkeypatch)
+    _install(tmp_path, "kemar", monkeypatch)
+    assert hrtf_module.available_profiles() == ("kemar", "ku100")
+
+
+def test_legacy_single_file_still_shows_up(tmp_path: Path, monkeypatch) -> None:
+    """已經匯入過的人升級之後不該突然找不到自己的資料。"""
+    legacy = tmp_path / "legacy.npz"
+    monkeypatch.setattr(hrtf_module, "hrtf_dir", lambda: tmp_path / "nonexistent")
+    monkeypatch.setattr(hrtf_module, "hrtf_file", lambda: legacy)
+    assert _convert(_dataset(tmp_path), legacy) == 0
+    assert hrtf_module.available_profiles() == ("imported",)
+    assert hrtf_module.profile_path("imported") == legacy
+
+
+def test_empty_profile_name_means_automatic(tmp_path: Path, monkeypatch) -> None:
+    """空字串＝自動：有匯入就用第一組。
+
+    這條讓已經匯入過的使用者升級後行為不變，而不是突然掉回合成模型。
+    """
+    _install(tmp_path, "ku100", monkeypatch)
+    assert hrtf_module.resolve_profile("") is not None
+
+
+def test_synthetic_is_selectable(tmp_path: Path, monkeypatch) -> None:
+    """必須能明確選內建模型 —— 不然「真人資料有沒有比較好」就無從 A/B。"""
+    _install(tmp_path, "ku100", monkeypatch)
+    assert hrtf_module.resolve_profile(hrtf_module.SYNTHETIC_PROFILE) is None
+
+
+def test_missing_profile_falls_back_instead_of_crashing(tmp_path: Path, monkeypatch) -> None:
+    """使用者刪掉檔案之後播放器不該就此打不開。"""
+    _install(tmp_path, "ku100", monkeypatch)
+    assert hrtf_module.resolve_profile("deleted") is None
+
+    upmix = SpatialUpmix()
+    upmix.hrtf_profile = "deleted"
+    upmix.binaural = True
+    upmix.prepare(RATE, 2, 2880)
+    assert not upmix.hrtf_is_measured
+    assert upmix.binaural
+
+
+def test_switching_profile_reloads_the_filters(tmp_path: Path, monkeypatch) -> None:
+    _install(tmp_path, "ku100", monkeypatch)
+
+    upmix = SpatialUpmix()
+    upmix.binaural = True
+    upmix.prepare(RATE, 2, 2880)
+    assert upmix.hrtf_is_measured, "自動應該挑到 ku100"
+
+    upmix.hrtf_profile = hrtf_module.SYNTHETIC_PROFILE
+    assert not upmix.hrtf_is_measured
+
+    upmix.hrtf_profile = "ku100"
+    assert upmix.hrtf_is_measured
