@@ -548,14 +548,38 @@ def _iacc(processor: SpatialUpmix, signal: FloatArray) -> float:
     return _correlation(left, right)
 
 
-def test_binaural_tracks_stereo_at_moderate_amount() -> None:
-    """一半以下的設定，HRTF 不該把音場拉到與 stereo renderer 差很遠。
+def test_binaural_is_never_more_anti_phase_than_stereo() -> None:
+    """binaural 可以比 stereo **更聚攏**，但不可以更反相。
 
-    這是目前**成立**的部分：0.5 以下兩個 renderer 的 IACC 幾乎重疊
-    （實測 0.623 vs 0.632）。全開時才會分岔，那部分見下面那條 xfail。
+    方向是不對稱的，所以斷言也要不對稱：經過 HRTF 之後低頻的耳間差本來就
+    比直接折回立體聲小（兩支前方喇叭在 ±30°，低頻幾乎同時到達兩耳），
+    所以 IACC 比 stereo 高是**物理上該有的**。會傷人的只有另一個方向 ——
+    反相音場聽起來是「在頭裡面」，正好是頭外化的反面。
     """
     signal = _program()
-    assert _iacc(_binaural(0.5), signal) == pytest.approx(_iacc(_make(0.5), signal), abs=0.1)
+    for amount in (0.25, 0.5, 0.75, 1.0):
+        binaural, stereo = _iacc(_binaural(amount), signal), _iacc(_make(amount), signal)
+        assert binaural >= stereo - 0.05, f"amount={amount}：binaural {binaural:+.3f} 比 stereo {stereo:+.3f} 更反相"
+
+
+def test_binaural_does_not_inflate_the_sides() -> None:
+    """成對的虛擬喇叭不可以比中央大聲 —— 那會把人聲推遠、左右樂器逼近。
+
+    這條是實機回報修出來的。``H_sum(θ) = H_i + H_c`` 在低頻趨近 ``2·H_0``，
+    但場景那一邊 ``centre + front_mid == mid`` 的權重都是 1，所以成對的路徑
+    如果不各承擔一半就整整多 6 dB。中央還要再被距離機制壓 5 dB，實聽的結果
+    是「人聲被拉很遠、左右樂器太近，像廉價耳機」。
+
+    量的是**同一個訊號裡**的 side/mid 比 —— 響度補償對 mid 與 side 等量施加，
+    所以遮不住這個比例。斷言不用門檻而是直接比物理期望：經過 ±30° 的一對
+    喇叭之後，兩耳的差本來就該比直接折回立體聲**小**（低頻幾乎同時到達兩耳），
+    所以 binaural 的側能量絕不該多於 stereo。實測 0.635 對 0.809；
+    少了各半的話是 0.964，這條就會紅。
+    """
+    signal = _program()
+    stereo = _side_over_mid(_run(_make(1.0), signal)[LATENCY * CHANNELS :])
+    binaural = _side_over_mid(_run(_binaural(1.0), signal)[LATENCY * CHANNELS :])
+    assert binaural <= stereo, f"binaural 的側能量 {binaural:.3f} 多於 stereo 的 {stereo:.3f}"
 
 
 def test_binaural_does_not_invert_the_soundstage() -> None:

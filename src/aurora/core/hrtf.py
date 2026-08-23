@@ -29,6 +29,13 @@
     M_out = C·H_0 + front_mid·H_sum(30°) + u·(D₁+D₂)/2 · H_sum(110°)
     S_out =         s·H_diff(30°)        + u·(D₁−D₂)/2 · H_diff(110°)
 
+**一對喇叭的濾波器要各承擔一半。** ``H_sum(θ) = H_i + H_c`` 在低頻趨近
+``2·H_0``（兩耳都聽得到、而且幾乎一樣），但場景那一邊給的權重是 1 ——
+``centre + front_mid == mid`` 是恆等式，立體聲 renderer 的兩條路權重都是 1。
+不補這個 ``0.5``，一對喇叭的路徑就整整多 6 dB，而中央還要再被距離機制壓
+5 dB：實聽的結果是「人聲被拉很遠、左右樂器太近，像廉價耳機」。這是實機
+回報出來的，量出來低頻確實差 +5.7 dB（實測 H13）與 +6.0 dB（合成模型）。
+
 也就是**每格五次複數乘法**，然後照舊兩次 irfft 得到左右耳 —— 與 Basic
 Stereo Renderer 完全相同的 FFT 次數。頭部的相位差（ITD）與頻率相依的遮蔽
 （ILD）全部藏在複數值裡，不需要額外的延遲線。
@@ -122,12 +129,15 @@ class HrtfFilters:
         """
         front_ipsi, front_contra = front
         surround_ipsi, surround_contra = surround
+        # 每支喇叭承擔它那一對的一半 —— 見模組 docstring 的「一對喇叭的
+        # 濾波器要各承擔一半」。少了它，成對的路徑會比中央多 6 dB。
+        half = _PAIR_SHARE
         return cls(
             centre=centre,
-            front_sum=front_ipsi + front_contra,
-            front_diff=front_ipsi - front_contra,
-            surround_sum=surround_ipsi + surround_contra,
-            surround_diff=surround_ipsi - surround_contra,
+            front_sum=(front_ipsi + front_contra) * half,
+            front_diff=(front_ipsi - front_contra) * half,
+            surround_sum=(surround_ipsi + surround_contra) * half,
+            surround_diff=(surround_ipsi - surround_contra) * half,
         )
 
     def __post_init__(self) -> None:
@@ -222,6 +232,9 @@ def interaural_delay_sec(azimuth_deg: float) -> float:
 
 # ---------------------------------------------------------------- 實測資料
 
+#: 一對喇叭裡每一支承擔的份額。場景給一對的權重是 1，而 H_sum 在低頻
+#: 趨近 2·H_0，所以要各半才回到場景的能量分配。
+_PAIR_SHARE = 0.5
 #: 量測格點與目標方位角最多可以差幾度。資料集的格點通常是 5° 或更密，
 #: 差超過這個值就代表拿到的不是那個方向的響應，寧可退回合成模型。
 _AZIMUTH_TOLERANCE_DEG = 7.5
