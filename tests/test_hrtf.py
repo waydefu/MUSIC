@@ -142,12 +142,19 @@ def _reference_ms(
     刻意不共用 ``hrtf.py`` 的任何化簡，這樣它才有資格當答案。環繞的兩個
     餵法直接傳進來，所以這個檔案完全不需要知道 ``spatial.py`` 怎麼產生
     去相關訊號 —— 驗的是推導，不是某一組特定的隨機相位。
+
+    **成對的喇叭每支只承擔一半。** 場景給「前方」與「環繞」各一份權重，
+    而那一份要由兩支喇叭分攤；不分攤的話成對的路徑會比中央多 6 dB
+    （實機聽起來就是人聲被推遠、左右樂器逼近）。這裡照著同一個慣例餵，
+    參考實作才問得出正確的答案。
     """
     centre_ear, _ = ear_pair(SAMPLE_RATE, FFT, 0.0)
     front_ipsi, front_contra = ear_pair(SAMPLE_RATE, FFT, HRTF_FRONT_AZIMUTH_DEG)
     surr_ipsi, surr_contra = ear_pair(SAMPLE_RATE, FFT, HRTF_SURROUND_AZIMUTH_DEG)
 
-    feed_fl, feed_fr = front_mid + side, front_mid - side
+    share = 0.5
+    feed_fl, feed_fr = (front_mid + side) * share, (front_mid - side) * share
+    feed_sl, feed_sr = feed_sl * share, feed_sr * share
 
     left = (
         centre * centre_ear

@@ -104,7 +104,9 @@ def test_tool_skips_measurements_off_the_horizontal_plane(tmp_path: Path) -> Non
     filters = load_filters(RATE, FFT, out)
     assert filters is not None
     # 水平的那一筆有 ITD，仰角 45° 的沒有 —— 選錯的話 diff 會是平的。
-    assert float(np.abs(filters.front_diff).max()) > 0.5
+    # 用與 sum 的比值而不是絕對值：濾波器的絕對尺度是實作細節
+    #（例如每支喇叭承擔一半），這條測試不該綁在上面。
+    assert float(np.abs(filters.front_diff).max()) > 0.1 * float(np.abs(filters.front_sum).max())
 
 
 def test_tool_refuses_a_directory_without_parsable_names(tmp_path: Path) -> None:
