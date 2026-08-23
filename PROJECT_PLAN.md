@@ -1334,7 +1334,9 @@ controller 的 fixture 則把 `hrtf_dir()` 與 `hrtf_file()` 兩個位置都指�
 |---|---|---|
 | **架構期** | S1 CI ／ S2 benchmark ／ S3 platform 縫 ／ S4 DSP graph | 全部已合併 |
 | **軌道 A** | A1 Aligned A/B ／ A2 EQ 全套 ／ A3 Spatial P1 | 已合併 |
-| | UI（音效面板）、P1.1 距離機制、P1.2 早期反射 | PR #10 待合併 |
+| | UI（音效面板）、P1.1 距離機制、P1.2 早期反射 | 已合併 |
+| | P2 HRTF renderer、實測 HRIR 匯入、Profile、空間精準度 | 已合併（§9.10） |
+| | 方向性聽測工具 | 已合併（§9.10） |
 | **軌道 B** | B1 `platform/macos.py`（reduce motion + Core Audio 端點） | 已合併 |
 | | B2 `app_data_dir()` 與快取鍵的 macOS 分支 | 已合併 |
 | | B3 macOS CI job 綠 | 已達成 |
@@ -1374,7 +1376,7 @@ macOS 的檔案關聯靠 `Info.plist`，本階段不打包）。
 | 項目 | 狀態 |
 |---|---|
 | 音效面板外觀（等比例縮放、滑桿吸附） | 實機看過並修正過兩輪；最新一輪未再確認 |
-| 耳機空間化的實際聽感 | ✅ 實機確認：左右與遠近**聽得出來**、前後**分不出來**、頭外化**有但不強**；人聲留在中間、切換不跳音量、全開不過寬（§9.10） |
+| 耳機空間化的實際聽感 | ✅ 實機確認（§9.10）。**前後判別 29–30/30**（正中面盲測，逐段等響度）；人聲留在中間、切換不跳音量、全開不過寬。剩下的缺口是**後方聲源的外化**（「在腦裡」） |
 | 響度補償是否造成抽吸感 | ✅ 實機確認**沒有起伏**（§9.9） |
 | 早期反射的實際聽感 | ✅ 實機確認**有加分**（§9.9） |
 | 打包版 | ✅ 2026-08-23 重驗（含 EQ／Spatial／反射**與 §9.10 的 HRTF**）：167 MB／2702 檔、凍結環境 QML 載入成功、adapter 解析為 Windows |
@@ -1390,6 +1392,56 @@ macOS 的檔案關聯靠 `Info.plist`，本階段不打包）。
 3. **合成訊號不能代表真實音樂。** 加寬效果在合成訊號上是綠的，在真實
    Dolby Atmos 素材上卻幾乎是零（§9.6）。斷言要用**倍率**而不是方向 ——
    只看「有變大」抓不到「小到聽不出來」。
+
+### 10.6 技術債清單
+
+這一節是**掃出來的，不是憑印象列的**。方法：對 `src/` 與 `tools/` 的所有
+模組層級名稱做引用計數、對 `Strings.qml` 的每一條文案反查 QML 引用、
+比對 `.md` 裡的基準數字與實際 gate 輸出。
+
+已經在這一輪處理掉的：
+
+| 項目 | 處置 |
+|---|---|
+| `core/eq.py` 的 `gain_to_linear` | 全庫零引用，已刪 |
+| README 的 mypy／pytest 基準數字 | 44→45 檔、366→460 條，已更新 |
+| ARCHITECTURE.md 的導航圖沒有 DSP 鏈 | 已補 graph、EQ、Spatial、反射、限幅、HRTF |
+| ARCHITECTURE.md 的責任索引把平台指向 `platform_win/` | 已改指 `platform/`，並註明不得從上層 import `platform_win`（`test_platform.py` 會擋） |
+| AGENTS.md 缺「回呼上不得配置記憶體」這條不變量 | 已補為第 10 條 |
+
+**還沒處理的，附判斷：**
+
+1. **`Strings.qml` 有 16 條文案沒有任何 QML 引用**（共 49 條）。分兩類，
+   處置不同：
+   - **10 條是未完成的無障礙標籤**（`play`／`pause`／`previous`／`next`／
+     `shuffle`／`repeat`／`mute`／`minimise`／`miniMode`／`close`）。
+     全庫的 QML **沒有任何 `Accessible.*`** —— 所以這不是死碼，是**一個做了
+     一半的功能留下的證據**。刪掉會讓那個缺口變成隱形，建議保留並把
+     「補上 `Accessible.name`」列為工作項。
+   - **6 條是孤兒狀態文案**（`effectsOff`／`fxDegraded`／`noTrack`／
+     `measuring`／`cinemaMode`／`qualityPreset`）。其中 `measuring` 與
+     `noTrack` 更麻煩：對應的文字目前是在 **Python 裡組出來的**
+     （`bridge/quality.py` 的 `"量測中… 已取樣 N 框"`、`"沒有輸出裝置"`），
+     直接違反「使用者可見文案的來源是 `Strings.qml`」。要修就是把數值往上
+     送、由 QML 組字串，屬跨層改動。
+
+2. **版本號停在 `0.1.0`，但距離 v0.1.0 tag 已經 77 個 commit。**
+   那個發行版**完全沒有** EQ、空間音效、HRTF。版本號因此不再描述樹上的東西，
+   任何「使用者回報 0.1.0 的 bug」都無法對應到程式碼。發行前必須 bump。
+
+3. **實測 HRTF 的舊版單檔相容碼**（`paths.hrtf_file()` 與 `imported` profile）。
+   單檔版與 profile 版都是 v0.1.0 之後才加的，**沒有任何已發行版本用過單檔
+   佈局**，所以這段相容碼服務的使用者數是 0（維護者自己的機器除外，而那份
+   檔案與 `h13.npz` 內容重複）。建議在下一次發行前刪掉。
+
+4. **兩支 HRTF 工具之間有共用邏輯靠 `sys.path` 互相 import**
+   （`make_direction_test.py` 從 `import_hrtf.py` 取 `onset`／`read_stereo_wav`／
+   `scan_directory`）。工具不進打包，所以影響有限；但再多一支工具就該把這幾個
+   函式下沉到 `core/`。
+
+5. **`processing_latency_frames` 仍未接上 position 補償。** 這是刻意的（見
+   `engine.py` 的 docstring），但延遲已經從 0 變成 EQ 511 + Spatial 1024 框，
+   歌詞對齊的誤差是真的存在了。
 
 ## 11. 明確押後
 

@@ -25,6 +25,10 @@ AURORA 是一款以封面、即時頻譜與沉浸式動效為核心的桌面音�
 - 封面主色抽取、動態背景、即時頻譜、粒子與後製效果
 - 可調整介面字體大小，設定於下次啟動時保留
 - 同名 `.lrc` 歌詞載入與時間同步
+- 十段等化器，附自動餘裕與前瞻限幅器（拉高不會削波）
+- 空間音效：相關性感知的虛擬 5.1 上混、距離感與早期反射
+- 耳機空間化（HRTF）：內建球形頭模型，或匯入實測 HRTF 資料集
+- 可切換多組 HRTF 設定檔並盲聽挑選，附「空間精準度」滑桿在定位與音色之間取捨
 - 音質面板：來源格式、取樣率、位元深度、頻譜截止、削波與疑似轉檔提示
 - 音訊端點資訊：Windows Core Audio 與 macOS Core Audio
 - Windows 藍牙編碼能力推導（macOS 藍牙 codec 目前不做推定）
@@ -228,8 +232,8 @@ uv run mypy --exclude 'platform_win' --follow-imports=silent
 目前品質基準（2026-08-22 於 Windows 實測）：
 
 - Ruff：通過
-- mypy：44 個來源檔通過
-- pytest：366 個測試通過、1 個跳過（`test_macos_platform.py` 的 Core Audio
+- mypy：45 個來源檔通過
+- pytest：460 個測試通過、1 個跳過（`test_macos_platform.py` 的 Core Audio
   測試只在 macOS 上跑，在 Windows 跳過是正確的）
 - QML 離屏載入：通過
 - Windows 打包版冷啟動：通過
@@ -261,14 +265,14 @@ CI 蓋不到、只能在實機做的：實際出聲的音訊測試、GUI 外觀�
 src/aurora/
 ├── audio/         # 播放引擎、頻譜與音質分析
 ├── bridge/        # Python/QML 控制器、Qt 模型與背景 metadata 協調
-├── core/          # 設定、常數與共用資料型別
+├── core/          # 設定、常數、共用資料型別與所有 DSP 處理器
 ├── library/       # 音樂掃描、metadata、封面與快取
 ├── platform/      # 跨平台能力契約與各平台 adapter
 ├── platform_win/  # Windows Core Audio 與藍牙實作細節
 └── qml/           # 主介面、面板、圖示與動效
 
 tests/             # 單元、整合及 Windows 音訊測試
-tools/             # Windows EXE、macOS app bundle 與開發工具
+tools/             # Windows EXE、macOS app bundle、HRTF 匯入與聽測工具
 packaging/         # 安裝／解除安裝腳本與發行說明
 data/              # 應用程式圖示與資料資源
 ```
