@@ -189,3 +189,16 @@ def test_effect_settings_survive_a_round_trip(tmp_path: Path) -> None:
     assert restored.eq_enabled is True
     assert restored.eq_gains == config.eq_gains
     assert restored.spatial_amount == 0.42
+
+
+def test_binaural_survives_a_round_trip() -> None:
+    """耳機空間化的開關要記得住，不然每次開 App 都要重設。"""
+    config = Config()
+    config.binaural = True
+    assert Config.from_dict(config.to_dict()).binaural
+
+
+def test_binaural_coerces_junk_to_a_bool() -> None:
+    """設定檔被手改壞時只能退回可用狀態，不能讓 App 開不起來。"""
+    assert Config.from_dict({"binaural": "yes"}).binaural is True
+    assert Config.from_dict({"binaural": None}).binaural is False
