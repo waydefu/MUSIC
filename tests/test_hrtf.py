@@ -191,8 +191,8 @@ def test_ms_shortcut_equals_per_speaker_rendering() -> None:
     # 環繞餵的是兩條互不相關的訊號，不是 ±u —— 推導必須對任意的一對成立。
     feed_sl, feed_sr = spectrum(), spectrum()
 
-    # 刻意用**未等化**的濾波器組。擴散場等化是每格一個共同的實數
-    #（由 test_equalisation_is_a_common_real_scalar 守著），所以它與這裡要驗的
+    # 刻意用**未補償**的濾波器組。佈局補償是每格一個共同的實數
+    #（由 test_layout_correction_is_a_common_real_scalar 守著），所以它與這裡要驗的
     # M/S 代數可交換 —— 把它算進來只會讓失敗訊息更難讀，證不了更多東西。
     filters = HrtfFilters.from_ear_pairs(
         centre=ear_pair(SAMPLE_RATE, FFT, 0.0)[0],
@@ -225,7 +225,7 @@ def test_shortcut_stays_a_handful_of_multiplies_per_bin() -> None:
     assert len(dataclasses.fields(HrtfFilters)) == 5
 
 
-# ------------------------------------------------------------------ 擴散場等化
+# ------------------------------------------------------------------ 佈局音色補償
 
 
 def _paths(filters: HrtfFilters) -> list[np.ndarray]:
@@ -239,7 +239,7 @@ def _paths(filters: HrtfFilters) -> list[np.ndarray]:
     ]
 
 
-def test_equalisation_is_a_common_real_scalar() -> None:
+def test_layout_correction_is_a_common_real_scalar() -> None:
     """等化必須是「每格一個共同的實數」。
 
     這條看似瑣碎，但它是另外兩件事的地基：**共同** ⇒ 與 M/S 代數可交換
@@ -252,7 +252,7 @@ def test_equalisation_is_a_common_real_scalar() -> None:
         front=ear_pair(SAMPLE_RATE, FFT, HRTF_FRONT_AZIMUTH_DEG),
         surround=ear_pair(SAMPLE_RATE, FFT, HRTF_SURROUND_AZIMUTH_DEG),
     )
-    equalised = raw.diffuse_field_equalised()
+    equalised = raw.layout_equalised()
 
     before, after = _paths(raw), _paths(equalised)
     # 只看兩邊都夠大的格，否則會拿 0/0 去比。
@@ -265,11 +265,13 @@ def test_equalisation_is_a_common_real_scalar() -> None:
     assert np.allclose(np.imag(ratios[0]), 0.0, atol=1e-9), "等化動到相位 ⇒ 會改掉 ITD"
 
 
-def test_equalisation_flattens_the_direction_independent_response() -> None:
-    """方向無關的共同響應要被壓平 —— 那一段不帶任何方向資訊。
+def test_layout_response_is_flattened() -> None:
+    """這個佈局的平均響應要被壓平 —— 那一段不帶任何方向資訊。
 
-    未等化時實測 H13 的共同響應相對 500 Hz 是 63 Hz −6.6 dB、8 kHz −4.0 dB，
-    聽起來就是「悶、沒有通透感、低頻不見」。
+    **補的是佈局不是資料集。** SADIE II 已經做過全球面的擴散場等化；
+    但 AURORA 只用到其中五個方向，那個子集的平均仍可能偏斜。未補償時實測
+    H13 相對 500 Hz 是 63 Hz −6.6 dB、8 kHz −4.0 dB，聽起來就是
+    「悶、沒有通透感、低頻不見」。
     """
     filters = synthetic_filters(SAMPLE_RATE, FFT)
     common = np.sqrt(np.mean([np.abs(item) ** 2 for item in _paths(filters)], axis=0))
@@ -279,7 +281,7 @@ def test_equalisation_flattens_the_direction_independent_response() -> None:
     assert spread_db < 6.0, f"共同響應仍有 {spread_db:.1f} dB 的起伏"
 
 
-def test_equalisation_preserves_interaural_level_differences() -> None:
+def test_layout_correction_preserves_interaural_level_differences() -> None:
     """ILD 是方向線索，等化不得動到它。
 
     等化是共同純量，所以近耳／遠耳的**比值**必須逐位元不變。
@@ -289,7 +291,7 @@ def test_equalisation_preserves_interaural_level_differences() -> None:
         front=ear_pair(SAMPLE_RATE, FFT, HRTF_FRONT_AZIMUTH_DEG),
         surround=ear_pair(SAMPLE_RATE, FFT, HRTF_SURROUND_AZIMUTH_DEG),
     )
-    equalised = raw.diffuse_field_equalised()
+    equalised = raw.layout_equalised()
 
     def ild(filters: HrtfFilters) -> np.ndarray:
         near = filters.front_sum + filters.front_diff
@@ -300,14 +302,14 @@ def test_equalisation_preserves_interaural_level_differences() -> None:
     assert np.allclose(ild(raw), ild(equalised))
 
 
-def test_equalisation_never_boosts_beyond_the_limit() -> None:
+def test_layout_correction_never_boosts_beyond_the_limit() -> None:
     """量測在極低頻與極高頻不可靠，沒有上限的話會把噪訊放大成隆隆聲或嘶聲。"""
     raw = HrtfFilters.from_ear_pairs(
         centre=ear_pair(SAMPLE_RATE, FFT, 0.0)[0],
         front=ear_pair(SAMPLE_RATE, FFT, HRTF_FRONT_AZIMUTH_DEG),
         surround=ear_pair(SAMPLE_RATE, FFT, HRTF_SURROUND_AZIMUTH_DEG),
     )
-    equalised = raw.diffuse_field_equalised()
+    equalised = raw.layout_equalised()
     keep = np.abs(raw.centre) > 1e-6
     gain_db = 20 * np.log10(np.abs(equalised.centre[keep]) / np.abs(raw.centre[keep]))
     assert gain_db.max() <= HRTF_EQ_LIMIT_DB + 1e-6
