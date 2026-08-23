@@ -119,10 +119,27 @@ def dataset_hrir(sources: dict[float, Path], azimuth: float) -> tuple[FloatArray
 
 
 def render(signal: FloatArray, left_ir: FloatArray, right_ir: FloatArray) -> FloatArray:
-    """把單聲道訊號擺到那個方向，回傳交錯的立體聲。"""
+    """把單聲道訊號擺到那個方向，回傳交錯的立體聲。**每段等響度。**
+
+    ## 為什麼一定要逐段對齊音量
+
+    HRTF 本身帶著方向相依的音量差：實測正前方比正後方大 4.5–6.3 dB
+    （三個資料集都是）。不對齊的話，聽的人只要學會「大聲＝前、小聲＝後」
+    就能拿滿分，**完全不需要聽到任何方向** —— 那樣量到的是音量辨別力，
+    不是空間聽覺。實際發生過：第一版拿到 30/30，查出來就是這個漏洞。
+
+    ``core/abcompare.py`` 的開頭早就寫著同一件事：不做音量匹配的 A/B 沒有
+    判斷力，0.5 dB 就足以讓盲測失去意義。這支工具當初漏了套上去。
+
+    對齊之後剩下的差別只有**頻譜形狀**，那正是要測的東西。
+    """
     left = np.convolve(signal, left_ir)
     right = np.convolve(signal, right_ir)
-    return np.stack([left, right], axis=1).reshape(-1)
+    stereo = np.stack([left, right], axis=1)
+    level = float(np.sqrt(np.mean(np.square(stereo))))
+    if level > 0.0:
+        stereo = stereo / level
+    return np.asarray(stereo.reshape(-1), dtype=np.float64)
 
 
 def write_wav(path: Path, rate: int, interleaved: FloatArray) -> None:

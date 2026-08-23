@@ -83,3 +83,25 @@ def test_burst_is_broadband(tmp_path: Path) -> None:
     for low, high in ((300.0, 1000.0), (2000.0, 6000.0), (8000.0, 14000.0)):
         band = (freqs >= low) & (freqs < high)
         assert spectrum[band].mean() > spectrum.max() * 0.01, f"{low}–{high} Hz 幾乎是空的"
+
+
+def test_every_direction_comes_out_at_the_same_level() -> None:
+    """逐段等響度 —— 否則量到的是音量辨別力，不是空間聽覺。
+
+    HRTF 自帶方向相依的音量差（實測正前比正後大 4.5–6.3 dB，三個資料集
+    都是）。不對齊的話「大聲＝前、小聲＝後」就能拿滿分。第一版真的因此
+    拿到 30/30，查出來是這個漏洞而不是聽力。
+
+    直接量 :func:`render` 的輸出而不是解析 WAV：段落邊界會隨脈衝長度浮動，
+    從檔案裡切段落只會量到切錯位置造成的假差異（第一版的測試就是這樣，
+    量到 1.0 dB 其實是切窗誤差）。
+    """
+    signal = tool.burst(RATE, seconds=0.2)
+    levels = []
+    for azimuth in (0.0, 180.0, 90.0, 150.0, -30.0):
+        left_ir, right_ir = tool.synthetic_hrir(RATE, azimuth)
+        piece = tool.render(signal, left_ir, right_ir)
+        levels.append(float(np.sqrt(np.mean(piece**2))))
+
+    spread_db = 20 * np.log10(max(levels) / min(levels))
+    assert spread_db < 0.05, f"各段音量差 {spread_db:.3f} dB，盲測會被音量線索污染"
