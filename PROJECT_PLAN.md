@@ -1280,12 +1280,18 @@ Merimaa（Sennheiser）的 AES 研究做過同一件事：降低 HRTF 的頻譜�
 
 #### 測試不得依賴開發者機器上的 HRTF
 
-加了 profile 之後出現一個真實的坑：`SpatialUpmix` 預設「自動」會去讀使用者
+加了 profile 之後出現一個真實的坑：`SpatialUpmix` 的「自動」會去讀使用者
 資料目錄，於是 `tests/test_spatial.py` 的 binaural 測試在**有匯入資料的機器上
 量到 H13、在 CI 上量到合成模型** —— 同一套測試驗的不是同一個東西。
 
-所以凡是不在測 profile 本身的測試，都要明確釘死 `SYNTHETIC_PROFILE`；
-測 profile 的則要同時隔離 `hrtf_dir()` 與 `hrtf_file()` 兩個位置。
+`bridge` 那邊也踩到同一件事，而且是 CI 先抓到的：`setHrtfProfile("synthetic")`
+原本比的是「解析後生效的那一組」，沒有匯入資料時那本來就是合成模型，
+於是提早返回、設定沒寫進去；有匯入資料的開發機則會通過。改成比**設定裡
+存的值** —— 這同時也更正確：明確選了合成模型是一個要記住的選擇，
+之後匯入資料時「自動」會跑掉，明確選的不會。
+
+規則：不在測 profile 本身的測試一律釘死 `SYNTHETIC_PROFILE`；會建立
+controller 的 fixture 則把 `hrtf_dir()` 與 `hrtf_file()` 兩個位置都指到空目錄。
 這與 `test_docs_references.py` 排除工具快取是同一個理由：**綠燈的意義要穩定。**
 
 #### 方向性聽測訊號（量尺，不是功能）
