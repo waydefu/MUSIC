@@ -1,7 +1,8 @@
-"""路徑解析：打包前後都要能找到資料檔與使用者設定。
+"""路徑解析：原始碼、Windows onedir 與 macOS app bundle 都能找到資源。
 
-PyInstaller 的 onefile 模式會把 ``datas`` 解壓到臨時目錄並設 ``sys._MEIPASS``，
-所以資源路徑不能寫死成專案相對路徑。這個模組是唯一處理這件事的地方。
+PyInstaller 的 frozen runtime 會以 ``sys._MEIPASS`` 指向收集資源的根目錄；
+onefile 是臨時解壓目錄，onedir 則是 bundle 內部目錄。資源路徑不能寫死成
+專案相對路徑，且使用者設定永遠不能寫進唯讀的應用程式 bundle。
 """
 
 from __future__ import annotations
@@ -14,12 +15,12 @@ from aurora import APP_NAME
 
 
 def _meipass() -> str | None:
-    """PyInstaller onefile 解壓目錄。非打包環境下這個屬性不存在。"""
+    """PyInstaller frozen 資源根目錄；非打包環境下不存在。"""
     return getattr(sys, "_MEIPASS", None)
 
 
 def is_frozen() -> bool:
-    """是否跑在 PyInstaller 打包出來的 EXE 裡。"""
+    """是否跑在 PyInstaller 打包出來的 EXE 或 app bundle 裡。"""
     return bool(getattr(sys, "frozen", False)) and _meipass() is not None
 
 
