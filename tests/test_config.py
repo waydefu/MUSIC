@@ -213,3 +213,8 @@ def test_hrtf_profile_survives_a_round_trip() -> None:
 def test_hrtf_profile_coerces_junk_to_empty() -> None:
     """壞掉的設定檔只能退回「自動」，不能讓 App 開不起來。"""
     assert Config.from_dict({"hrtf_profile": None}).hrtf_profile == ""
+
+
+def test_hrtf_accuracy_is_clamped() -> None:
+    assert Config.from_dict({"hrtf_accuracy": 5.0}).hrtf_accuracy == 1.0
+    assert Config.from_dict({"hrtf_accuracy": -1.0}).hrtf_accuracy == 0.0

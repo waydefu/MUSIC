@@ -400,6 +400,51 @@ Item {
                     wrapMode: Text.WordWrap
                 }
 
+                // 空間精準度。它交換的是定位與音色，不是高頻等化 ——
+                // 文案不能寫成「高頻補償」，那會讓人以為是 EQ。
+                Item {
+                    width: parent.width
+                    height: 30
+                    visible: root.controller ? root.controller.binauralEnabled : false
+
+                    Text {
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: Strings.hrtfAccuracy
+                        color: "white"
+                        font.pixelSize: 13.5 * Appearance.fontScale
+                    }
+                    Text {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: Math.round(accuracySlider.value * 100) + "%"
+                        color: root.accent
+                        font.pixelSize: 13 * Appearance.fontScale
+                        font.weight: Font.DemiBold
+                    }
+                }
+
+                Slider {
+                    id: accuracySlider
+                    width: parent.width
+                    visible: root.controller ? root.controller.binauralEnabled : false
+                    from: 0.0
+                    to: 1.0
+                    stepSize: 0.05
+                    snapMode: Slider.SnapAlways
+                    value: root.controller ? root.controller.hrtfAccuracy : 1.0
+                    onMoved: if (root.controller) root.controller.setHrtfAccuracy(value)
+                }
+
+                Text {
+                    width: parent.width
+                    visible: root.controller ? root.controller.binauralEnabled : false
+                    text: Strings.hrtfAccuracyHint
+                    color: Qt.rgba(1, 1, 1, 0.42)
+                    font.pixelSize: 12.5 * Appearance.fontScale
+                    wrapMode: Text.WordWrap
+                }
+
                 // 合成模型與實測資料的差別要照實講。合成的沒有耳廓、前後
                 // 分不出來，冒充完成品只會讓人以為功能壞了。
                 Text {

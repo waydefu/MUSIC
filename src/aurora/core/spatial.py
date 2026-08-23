@@ -57,6 +57,7 @@ import numpy as np
 import numpy.typing as npt
 
 from aurora.core.constants import (
+    HRTF_CUE_STRENGTH,
     SPATIAL_COHERENCE_SMOOTHING,
     SPATIAL_DECORRELATION_HP_HZ,
     SPATIAL_DEPTH_CURVE,
@@ -108,6 +109,7 @@ class SpatialUpmix:
         self._hrtf: HrtfFilters | None = None
         self._hrtf_measured = False
         self._hrtf_profile = ""
+        self._cue_strength = HRTF_CUE_STRENGTH
         self._sample_rate = 0
 
         # sqrt-Hann 用於分析與合成。平方後就是 Hann，而 Hann 在 50% 重疊下
@@ -203,6 +205,21 @@ class SpatialUpmix:
         if self._binaural and self._sample_rate:
             self._load_hrtf(self._sample_rate)
 
+    @property
+    def cue_strength(self) -> float:
+        """頻譜線索強度，1.0 ＝ 資料集原樣、0.0 ＝ 只留粗略輪廓。
+
+        交換的是**定位準確度與音色自然度**，不是在做等化 —— 詳見
+        ``core/hrtf.py`` 的 :meth:`HrtfFilters.with_cue_strength`。
+        """
+        return self._cue_strength
+
+    @cue_strength.setter
+    def cue_strength(self, value: float) -> None:
+        self._cue_strength = float(np.clip(value, 0.0, 1.0))
+        if self._binaural and self._sample_rate:
+            self._load_hrtf(self._sample_rate)
+
     def _load_hrtf(self, sample_rate: int) -> None:
         """依 profile 載入實測資料，沒有或壞掉就退回合成模型。
 
@@ -213,7 +230,8 @@ class SpatialUpmix:
         path = resolve_profile(self._hrtf_profile)
         measured = load_filters(sample_rate, self._fft, path) if path is not None else None
         self._hrtf_measured = measured is not None
-        self._hrtf = measured or synthetic_filters(sample_rate, self._fft)
+        chosen = measured or synthetic_filters(sample_rate, self._fft)
+        self._hrtf = chosen.with_cue_strength(self._cue_strength)
 
     @property
     def surround_level(self) -> float:
