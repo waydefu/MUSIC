@@ -6,7 +6,9 @@
 
 AURORA 是一款以封面、即時頻譜與沉浸式動效為核心的桌面音樂播放器。介面使用 PySide6／Qt Quick 製作，播放層採用 miniaudio，並提供來源音質、頻譜截止、疑似假無損、削波與音訊端點分析。
 
-> Windows 提供 EXE 發行包；macOS 可從原始碼執行。Windows EXE 無法直接在 macOS 執行，macOS 尚未提供 app bundle、簽章或正式安裝包。
+> Windows 提供 EXE 發行包；macOS Apple Silicon 可從原始碼執行，或自行建置
+> 個人使用版 `AURORA.app`。macOS 版本沒有 Apple Developer 簽章、notarization
+> 或正式安裝包。
 
 ## 主要功能
 
@@ -100,11 +102,12 @@ Windows 10 之後不允許程式自行把自己設成預設處理常式（`UserC
 
 ### 環境需求
 
-- Windows x64，或 macOS（僅從原始碼執行）
+- Windows x64，或 macOS Apple Silicon
 - Python 3.11
 - [uv](https://docs.astral.sh/uv/)
 
-目前主要驗證環境為 Windows 11 23H2（build 22631）與 macOS；macOS 尚未提供可安裝的打包版。
+目前主要驗證環境為 Windows 11 23H2（build 22631）與 macOS；macOS 只提供
+自行建置的個人使用版，不提供正式安裝包。
 
 ```text
 git clone https://github.com/waydefu/MUSIC.git
@@ -158,6 +161,49 @@ dist/AURORA/AURORA.exe
 ```
 
 建置腳本使用 PyInstaller `onedir` 模式，會一併收集 Qt QML、應用程式圖示、miniaudio 與 `_cffi_backend`。請勿刪除 EXE 旁的 `_internal` 目錄，否則程式無法啟動。
+
+## 建置 macOS 個人使用版
+
+只支援 Apple Silicon（arm64）。在 macOS 的專案根目錄執行：
+
+```sh
+uv sync --dev
+uv run python tools/build_app.py --verify
+```
+
+輸出位置：
+
+```text
+dist/AURORA.app
+```
+
+這是 PyInstaller `onedir` app bundle，會一併收集 Qt Quick／QML、Cocoa platform
+plugin、AURORA 圖示、著色器、miniaudio、`_miniaudio` 與 `_cffi_backend`。
+PyInstaller 也會留下 `dist/AURORA-macos` 收集目錄；它是建置副產物，
+`AURORA.app` 本身可獨立移動與開啟。
+
+第一次開啟時，請在 Finder 對 `AURORA.app` 按右鍵 → **打開** → 再確認
+**打開**。之後可直接雙擊，或在專案根目錄用終端機啟動：
+
+```sh
+open dist/AURORA.app
+```
+
+這個 bundle 是個人自用版本，沒有 Apple Developer 簽章或 notarization；也不包含
+DMG、檔案關聯或自動更新。設定、播放清單與封面快取會寫入
+`~/Library/Application Support/Aurora`，不會寫進 `.app`。
+
+建置腳本不會自動刪除或覆寫既有產物。若輸出已存在，請先自行移走
+`dist/AURORA.app` 與 `dist/AURORA-macos`，或以這個指令只驗證現有產物：
+
+```sh
+uv run python tools/build_app.py --skip-build --verify
+```
+
+若專案位於 iCloud 同步的「桌面」，建置腳本會先在 `/private/tmp` 完成
+PyInstaller 的 ad-hoc bundle 簽署與 strict 驗證，再把產物移入 `dist/`；Finder／File
+Provider 搬移後加入的 metadata 不會被誤判為程式碼簽署失效。這不是 Apple Developer
+簽章或 notarization。
 
 ## 品質檢查
 
@@ -222,7 +268,7 @@ src/aurora/
 └── qml/           # 主介面、面板、圖示與動效
 
 tests/             # 單元、整合及 Windows 音訊測試
-tools/             # EXE 建置與開發工具
+tools/             # Windows EXE、macOS app bundle 與開發工具
 packaging/         # 安裝／解除安裝腳本與發行說明
 data/              # 應用程式圖示與資料資源
 ```
@@ -236,7 +282,8 @@ data/              # 應用程式圖示與資料資源
 ## 已知平台限制
 
 - Windows 的藍牙編碼資訊依賴 Core Audio、Windows Registry 與 Win32 API；macOS 目前不推定藍牙 codec，會降級為未知。
-- macOS 可從原始碼執行，但尚無 app bundle、簽章、正式安裝包或檔案關聯；檔案關聯需未來在 bundle 的 `Info.plist` 宣告。
+- macOS 可從原始碼執行，也可自行建置沒有 Apple Developer 簽章、未 notarize
+  的 Apple Silicon 個人使用版 app bundle；目前沒有正式安裝包、DMG 或檔案關聯。
 - Linux 尚未提供平台介面實作或正式安裝包。
 - 音質推估會受到母帶、濾波器、取樣率與編碼器設定影響，結果應視為分析提示。
 
