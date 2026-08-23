@@ -75,6 +75,19 @@ def library_file() -> Path:
     return app_data_dir() / "library.json"
 
 
+def hrtf_file() -> Path:
+    """使用者自備的實測 HRTF 資料。
+
+    **刻意放在使用者資料目錄而不是打包進去。** HRTF 資料集有各自的授權
+    （SADIE II 是 Apache-2.0，但不是每一套都可以再散布），而且多數使用者
+    根本不會用到 —— 為它加執行期相依或撐大 bundle 都不划算。
+    檔案不存在時 HRTF renderer 自動退回合成頭模型，不是錯誤狀態。
+
+    由 ``tools/import_hrtf.py`` 從資料集的 WAV 轉出來。
+    """
+    return app_data_dir() / "hrtf.npz"
+
+
 def covers_dir() -> Path:
     directory = app_data_dir() / "covers"
     directory.mkdir(parents=True, exist_ok=True)
