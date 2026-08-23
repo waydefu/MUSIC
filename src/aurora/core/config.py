@@ -79,6 +79,9 @@ class Config:
     #: 選用的 HRTF profile。空字串＝自動（有匯入就用第一組）、
     #: ``synthetic``＝內建合成模型。其餘是使用者匯入的檔名。
     hrtf_profile: str = ""
+    #: 頻譜線索強度（空間精準度）。1.0 ＝ 資料集原樣、0.0 ＝ 音色最自然。
+    #: 預設不柔化：要不要拿定位換音色是使用者的選擇。
+    hrtf_accuracy: float = 1.0
 
     # ---------------------------------------------------------- 序列化
 
@@ -145,6 +148,7 @@ class Config:
         self.spatial_amount = min(max(float(self.spatial_amount), 0.0), 1.0)
         self.binaural = bool(self.binaural)
         self.hrtf_profile = str(self.hrtf_profile or "")
+        self.hrtf_accuracy = min(max(float(self.hrtf_accuracy), 0.0), 1.0)
 
         self.window.width = max(720, int(self.window.width))
         self.window.height = max(480, int(self.window.height))

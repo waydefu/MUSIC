@@ -77,6 +77,7 @@ class AudioFxController(QObject):
         self._eq_enabled = config.eq_enabled
         self._spatial.amount = config.spatial_amount
         self._spatial.hrtf_profile = config.hrtf_profile
+        self._spatial.cue_strength = config.hrtf_accuracy
         self._spatial.binaural = config.binaural
         self._reflections.amount = config.spatial_amount
 
@@ -182,6 +183,19 @@ class AudioFxController(QObject):
             return
         self._config.hrtf_profile = name
         self._spatial.hrtf_profile = name
+        self.spatialChanged.emit()
+
+    @Property(float, notify=spatialChanged)
+    def hrtfAccuracy(self) -> float:
+        """空間精準度：高＝定位準，低＝音色自然。**不是高頻等化。**"""
+        return self._spatial.cue_strength
+
+    @Slot(float)
+    def setHrtfAccuracy(self, value: float) -> None:
+        if abs(value - self._spatial.cue_strength) < 1e-6:
+            return
+        self._spatial.cue_strength = value
+        self._config.hrtf_accuracy = self._spatial.cue_strength
         self.spatialChanged.emit()
 
     @Property(bool, notify=spatialChanged)

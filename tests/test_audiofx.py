@@ -266,8 +266,13 @@ def test_binaural_does_not_install_a_stage_by_itself(fx: object) -> None:
 
 
 def test_binaural_reports_the_synthetic_model_without_imported_data(fx: object) -> None:
-    """沒有匯入資料時要照實說是合成模型，不能冒充完成品。"""
+    """選了合成模型就要照實說是合成模型，不能冒充完成品。
+
+    明確選 synthetic 而不是靠「剛好沒匯入」—— 後者會讓這條測試在開發者
+    機器上（有匯入資料）與 CI 上驗到不同的東西。
+    """
     controller, _, _ = fx
+    controller.setHrtfProfile("synthetic")
     controller.setBinauralEnabled(True)
     assert not controller.hrtfIsMeasured
 
@@ -283,3 +288,16 @@ def test_choosing_a_profile_reaches_the_config(fx: object) -> None:
     controller.setHrtfProfile("synthetic")
     assert config.hrtf_profile == "synthetic"
     assert controller.hrtfProfile == "synthetic"
+
+
+def test_spatial_accuracy_defaults_to_full(fx: object) -> None:
+    """預設給使用者「資料集原本的樣子」，要不要拿定位換音色是他的選擇。"""
+    controller, _, _ = fx
+    assert controller.hrtfAccuracy == 1.0
+
+
+def test_spatial_accuracy_reaches_the_processor_and_the_config(fx: object) -> None:
+    controller, _, config = fx
+    controller.setHrtfAccuracy(0.5)
+    assert controller.hrtfAccuracy == pytest.approx(0.5)
+    assert config.hrtf_accuracy == pytest.approx(0.5)

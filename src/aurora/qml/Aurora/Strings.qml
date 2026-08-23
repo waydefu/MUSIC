@@ -34,6 +34,8 @@ QtObject {
     readonly property string binauralMeasured: "目前用你匯入的實測 HRTF 資料。"
     readonly property string hrtfProfile: "HRTF 設定檔"
     readonly property string hrtfProfileSynthetic: "內建合成模型"
+    readonly property string hrtfAccuracy: "空間精準度"
+    readonly property string hrtfAccuracyHint: "高：方向感更精準。低：音色更自然。時間差與音量差不受影響，調整的只有耳廓造成的細微頻率起伏。"
     readonly property string hrtfProfileHint: "每一組是一個人（或一顆假人頭）的耳朵量測。別人的耳朵不一定適合你，用聽的挑最自然的那一組。"
     readonly property string resetEq: "歸零"
     readonly property string headroom: "自動餘裕"
