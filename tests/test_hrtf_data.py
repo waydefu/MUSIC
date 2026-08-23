@@ -49,16 +49,26 @@ def _write_pair(path: Path, rate: int, left_delay: int, right_delay: int) -> Non
         handle.writeframes((frames * 32767).astype("<i2").tobytes())
 
 
-def _dataset(directory: Path, rate: int = RATE, itd_samples: int = 12) -> Path:
+def _dataset(
+    directory: Path,
+    rate: int = RATE,
+    itd_samples: int = 12,
+    lead: int = 8,
+    near: str = "right",
+) -> Path:
     """造出一個「格點命名」的資料集：0°／30°／110° 各一個檔。
 
     0° 兩耳相同（沒有 ITD），另外兩個方位角讓遠耳晚 ``itd_samples``。
+    ``near`` 決定正方位角在哪一側 —— 真實資料集兩種都有（SADIE II 是左）。
+    ``lead`` 是共模傳播延遲，兩耳都有，匯入時應該被切掉。
     """
-    _write_pair(directory / "azi_0,0_ele_0,0.wav", rate, 8, 8)
-    _write_pair(directory / "azi_30,0_ele_0,0.wav", rate, 8 + itd_samples, 8)
-    _write_pair(directory / "azi_110,0_ele_0,0.wav", rate, 8 + itd_samples, 8)
+    far = lead + itd_samples
+    left, right = (lead, far) if near == "left" else (far, lead)
+    _write_pair(directory / "azi_0,0_ele_0,0.wav", rate, lead, lead)
+    _write_pair(directory / "azi_30,0_ele_0,0.wav", rate, left, right)
+    _write_pair(directory / "azi_110,0_ele_0,0.wav", rate, left, right)
     # 仰角不是 0 的量測必須被跳過，否則會蓋掉正確的那一筆。
-    _write_pair(directory / "azi_30,0_ele_45,0.wav", rate, 8, 8)
+    _write_pair(directory / "azi_30,0_ele_45,0.wav", rate, lead, lead)
     return directory
 
 
@@ -228,3 +238,63 @@ def test_renderer_falls_back_to_synthetic_without_data(tmp_path: Path, monkeypat
     assert not upmix.hrtf_is_measured
     # 合成模型仍然可用，binaural 不會因為缺資料而失效。
     assert upmix.binaural
+
+
+# ------------------------------------------------------------------ 座標與對齊
+
+
+def test_both_ear_conventions_produce_identical_filters(tmp_path: Path) -> None:
+    """資料集的方位角正方向朝左或朝右，轉出來的濾波器必須一模一樣。
+
+    這是近耳偵測的核心不變量。猜錯側別的話音場會左右顛倒，而那用聽的很難
+    確定是哪一邊錯 —— 所以工具不看慣例，直接量「哪耳先收到聲音」。
+    實例：SADIE II 是逆時針，+30° 在左邊；別套資料集可能相反。
+    """
+    right_dir, left_dir = tmp_path / "r", tmp_path / "l"
+    right_dir.mkdir()
+    left_dir.mkdir()
+    _dataset(right_dir, near="right")
+    _dataset(left_dir, near="left")
+
+    out_right, out_left = tmp_path / "r.npz", tmp_path / "l.npz"
+    assert _convert(right_dir, out_right) == 0
+    assert _convert(left_dir, out_left) == 0
+
+    from_right = load_filters(RATE, FFT, out_right)
+    from_left = load_filters(RATE, FFT, out_left)
+    assert from_right is not None and from_left is not None
+    assert np.allclose(from_right.front_sum, from_left.front_sum)
+    assert np.allclose(from_right.front_diff, from_left.front_diff)
+    assert np.allclose(from_right.surround_diff, from_left.surround_diff)
+
+
+def test_conflicting_near_ear_is_refused(tmp_path: Path) -> None:
+    """兩個方位角量到相反的近耳 ⇒ 資料有問題，停下來要求人明講。
+
+    默默挑一邊會產生一個左右顛倒但完全不報錯的音場。
+    """
+    _write_pair(tmp_path / "azi_0,0_ele_0,0.wav", RATE, 8, 8)
+    _write_pair(tmp_path / "azi_30,0_ele_0,0.wav", RATE, 20, 8)
+    _write_pair(tmp_path / "azi_110,0_ele_0,0.wav", RATE, 8, 20)
+    assert _convert(tmp_path, tmp_path / "hrtf.npz") != 0
+
+
+def test_common_propagation_delay_is_removed(tmp_path: Path) -> None:
+    """量測 HRIR 前面那段共模空白必須切掉，否則濕訊號會比乾訊號晚。
+
+    H13 的實測值是 102 個取樣（2.1 ms）。renderer 會把濕與乾交叉淡入，
+    差 102 個取樣相加就是梳狀濾波 —— 48 kHz 下每 471 Hz 一個凹陷，很空。
+    """
+    lead, itd = 100, 12
+    out = tmp_path / "hrtf.npz"
+    assert _convert(_dataset(tmp_path, lead=lead, itd_samples=itd), out) == 0
+
+    with np.load(out) as data:
+        assert int(data["trimmed"]) == lead - 8, "應該切到只剩護欄的那幾個取樣"
+        near = np.asarray(data["ipsi"])[0]
+    assert int(np.argmax(np.abs(near))) <= 8
+
+    # 切掉的是**共模**的部分，兩耳之間的 ITD 必須原封不動。
+    filters = load_filters(RATE, FFT, out)
+    assert filters is not None
+    assert _ear_delay_samples(filters) == itd
