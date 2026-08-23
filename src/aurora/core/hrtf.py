@@ -7,24 +7,37 @@
 
 推導。虛擬喇叭對稱擺放，右側 ``+θ`` 的喇叭到**近耳**的轉移函數記為
 ``H_i(θ)``、到**遠耳**記為 ``H_c(θ)``；左側 ``−θ`` 依頭部左右對稱互換。
-場景的三個成分（見 ``spatial.py`` 的 ``_build_scene``）餵法是::
+一對喇叭餵 ``(a, b)``（左、右）時，兩耳收到的是::
 
-    C          → 兩個喇叭以外的置中喇叭
-    FL / FR    → front_mid ± s
-    SL / SR    → ± u
+    L_ear = a·H_i + b·H_c
+    R_ear = a·H_c + b·H_i
 
-把五個喇叭的貢獻加到兩耳，再轉回 M/S（``M = (L+R)/2``、``S = (L−R)/2``），
-交叉項會整組消掉，只剩::
+轉回 M/S（``M = (L+R)/2``、``S = (L−R)/2``）之後交叉項整組消掉，只剩::
 
-    M_out = C·H_0 + front_mid·H_sum(30°)
-    S_out = s·H_diff(30°) + u·H_diff(110°)
+    M ← (a+b)/2 · H_sum(θ)      其中 H_sum(θ)  = H_i(θ) + H_c(θ)
+    S ← (a−b)/2 · H_diff(θ)          H_diff(θ) = H_i(θ) − H_c(θ)
 
-    其中 H_sum(θ) = H_i(θ) + H_c(θ)
-        H_diff(θ) = H_i(θ) − H_c(θ)
+**兩對喇叭走的是同一條規則**：餵法的和進 mid、差進 side。代進場景
+（見 ``spatial.py`` 的 ``_build_scene``）::
 
-也就是**每格四次複數乘法**，然後照舊兩次 irfft 得到左右耳 —— 與現在的
-Basic Stereo Renderer 完全相同的 FFT 次數。頭部的相位差（ITD）與頻率相依
-的遮蔽（ILD）全部藏在 ``H_diff`` 的複數值裡，不需要額外的延遲線。
+    C                → 置中喇叭，兩耳相同
+    FL / FR = front_mid ± s          ⇒ 和 = front_mid、差 = s
+    SL / SR = u·D₁ , u·D₂            ⇒ 和 = u·(D₁+D₂)/2、差 = u·(D₁−D₂)/2
+
+於是::
+
+    M_out = C·H_0 + front_mid·H_sum(30°) + u·(D₁+D₂)/2 · H_sum(110°)
+    S_out =         s·H_diff(30°)        + u·(D₁−D₂)/2 · H_diff(110°)
+
+也就是**每格五次複數乘法**，然後照舊兩次 irfft 得到左右耳 —— 與 Basic
+Stereo Renderer 完全相同的 FFT 次數。頭部的相位差（ITD）與頻率相依的遮蔽
+（ILD）全部藏在複數值裡，不需要額外的延遲線。
+
+``D₁``、``D₂`` 是兩組固定的隨機相位。**環繞不能餵 ±u。** P1 折回立體聲時
+SL/SR 就是 ±u（完全反相），那在立體聲下只是加寬；但反相的一對在上面的式子
+裡和恆為 0，經過 HRTF 之後只剩純反相的 side，實測耳間相關性掉到 −0.45，
+聽起來是「在頭裡面」—— 正好是頭外化的反面。真實的 5.1 環繞本來就是兩條
+互不相關的訊號，所以這裡給兩組獨立的去相關。
 
 這個化簡成立的前提是**場景左右對稱**。P1 的場景天生對稱（M/S 表示法本身
 就是對稱的），所以現在成立；哪天做了 re-panning 讓個別物件不對稱，這條
@@ -73,7 +86,7 @@ ComplexArray = npt.NDArray[np.complex128]
 
 @dataclass(frozen=True, slots=True)
 class HrtfFilters:
-    """renderer 要用的四條頻域濾波器，全部是 rfft 長度的複數陣列。
+    """renderer 要用的五條頻域濾波器，全部是 rfft 長度的複數陣列。
 
     這是 renderer 與資料來源之間的唯一介面：合成模型與之後的 SADIE II
     SOFA 載入器都產生這個型別，``spatial.py`` 不需要知道差別。
@@ -85,7 +98,10 @@ class HrtfFilters:
     front_sum: ComplexArray
     #: 前方喇叭對的差 —— 作用在 side 成分上，ITD／ILD 都在這裡。
     front_diff: ComplexArray
-    #: 環繞喇叭對的差 —— 環繞成分只有 side，沒有 mid（見模組 docstring 的推導）。
+    #: 環繞喇叭對的和。環繞餵的是兩條去相關訊號而不是 ±u，所以它**也**有
+    #: mid 成分 —— 那正是不讓音場變成純反相的關鍵（見模組 docstring）。
+    surround_sum: ComplexArray
+    #: 環繞喇叭對的差。
     surround_diff: ComplexArray
 
     @classmethod
@@ -98,7 +114,7 @@ class HrtfFilters:
         """由「近耳／遠耳」的原始響應組出 sum/diff 形式。
 
         資料集給的一律是左右耳（或近／遠耳）的 HRIR，轉換在這裡做一次，
-        renderer 就永遠只看得到 M/S 需要的那四條。之後接 SADIE II 的
+        renderer 就永遠只看得到 M/S 需要的那五條。之後接 SADIE II 的
         SOFA 載入器，也是把讀到的 HRIR 做 rfft 之後餵進這裡。
         """
         front_ipsi, front_contra = front
@@ -107,6 +123,7 @@ class HrtfFilters:
             centre=centre,
             front_sum=front_ipsi + front_contra,
             front_diff=front_ipsi - front_contra,
+            surround_sum=surround_ipsi + surround_contra,
             surround_diff=surround_ipsi - surround_contra,
         )
 
@@ -115,10 +132,11 @@ class HrtfFilters:
             self.centre.size,
             self.front_sum.size,
             self.front_diff.size,
+            self.surround_sum.size,
             self.surround_diff.size,
         }
         if len(sizes) != 1:
-            raise ValueError(f"四條濾波器長度必須相同，收到 {sizes}")
+            raise ValueError(f"五條濾波器長度必須相同，收到 {sizes}")
 
 
 def ear_pair(

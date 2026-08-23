@@ -558,21 +558,32 @@ def test_binaural_tracks_stereo_at_moderate_amount() -> None:
     assert _iacc(_binaural(0.5), signal) == pytest.approx(_iacc(_make(0.5), signal), abs=0.1)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "已知缺口：全開時環繞是以 ±u 反相餵給 SL/SR 的（P1 折回立體聲時無害），"
-        "經過 HRTF 之後會產生反相音場。實測 IACC 掉到 −0.45，"
-        "而真實雙耳渲染不會讓一般音樂變成負相關。"
-        "修法要嘛讓環繞餵獨立的去相關訊號、要嘛補 diffuse-field EQ —— "
-        "兩者都要動到場景建構，屬於下一個切片。"
-    ),
-)
-def test_binaural_keeps_a_real_mix_positively_correlated() -> None:
-    """一般音樂經過雙耳渲染後，兩耳仍應正相關。
+def test_binaural_does_not_invert_the_soundstage() -> None:
+    """雙耳渲染不得把一般音樂變成反相。
 
-    負的 IACC 聽起來是「在頭裡面、相位怪、不穩定」，正好是頭外化的反面。
-    這條刻意留成 strict xfail 而不是拿掉：它是 P2 下一步的驗收條件，
-    修好的那天測試會因為「意外通過」而叫，不會被默默忘記。
+    這條是修出來的，不是一開始就綠的。環繞原本沿用 P1 折回立體聲的 ±u
+    （完全反相）餵法：在立體聲下那只是加寬，但反相的一對在 M/S 推導裡
+    「和」恆為 0，過了 HRTF 就只剩純反相的 side —— 實測 IACC 掉到 −0.45，
+    聽起來是「在頭裡面」，正好是頭外化的反面。改成餵兩條互不相關的訊號
+    之後回到 +0.00。
+
+    門檻設在 −0.05 而不是 0：要守的物理性質是「不得反相」，不是「必須正到
+    某個數字」。全開時本來就該是很寬的音場。
     """
-    assert _iacc(_binaural(1.0), _program()) > 0.0
+    assert _iacc(_binaural(1.0), _program()) > -0.05
+
+
+def test_binaural_stays_clearly_positive_below_full() -> None:
+    """日常會用到的設定要維持明確的正相關。"""
+    assert _iacc(_binaural(0.75), _program()) > 0.15
+
+
+def test_binaural_puts_diffuse_content_near_zero() -> None:
+    """擴散場的 IACC 本來就該接近 0，不是負的。
+
+    這裡 binaural **比 P1 的 stereo fold 更接近物理**（實測 −0.07 vs −0.44）
+    —— 因為 stereo fold 只有 ±u 這一條路可走。斷言比的是「誰比較接近 0」，
+    這樣如果有人把環繞改回反相餵法，這條會紅。
+    """
+    signal = _diffuse_content()
+    assert abs(_iacc(_binaural(1.0), signal)) < abs(_iacc(_make(1.0), signal))

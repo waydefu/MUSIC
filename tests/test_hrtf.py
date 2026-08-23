@@ -110,6 +110,7 @@ def test_filters_match_the_spatial_fft() -> None:
     assert filters.centre.size == BINS
     assert filters.front_sum.size == BINS
     assert filters.front_diff.size == BINS
+    assert filters.surround_sum.size == BINS
     assert filters.surround_diff.size == BINS
 
 
@@ -121,6 +122,7 @@ def test_mismatched_filter_lengths_are_rejected() -> None:
             centre=ones,
             front_sum=ones,
             front_diff=ones,
+            surround_sum=ones,
             surround_diff=np.ones(BINS - 1, dtype=np.complex128),
         )
 
@@ -129,18 +131,23 @@ def test_mismatched_filter_lengths_are_rejected() -> None:
 
 
 def _reference_ms(
-    centre: np.ndarray, front_mid: np.ndarray, side: np.ndarray, surround: np.ndarray
+    centre: np.ndarray,
+    front_mid: np.ndarray,
+    side: np.ndarray,
+    feed_sl: np.ndarray,
+    feed_sr: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
     """最笨的參考實作：五個喇叭各自送到兩耳，最後才轉回 M/S。
 
-    刻意不共用 ``hrtf.py`` 的任何化簡，這樣它才有資格當答案。
+    刻意不共用 ``hrtf.py`` 的任何化簡，這樣它才有資格當答案。環繞的兩個
+    餵法直接傳進來，所以這個檔案完全不需要知道 ``spatial.py`` 怎麼產生
+    去相關訊號 —— 驗的是推導，不是某一組特定的隨機相位。
     """
     centre_ear, _ = ear_pair(SAMPLE_RATE, FFT, 0.0)
     front_ipsi, front_contra = ear_pair(SAMPLE_RATE, FFT, HRTF_FRONT_AZIMUTH_DEG)
     surr_ipsi, surr_contra = ear_pair(SAMPLE_RATE, FFT, HRTF_SURROUND_AZIMUTH_DEG)
 
     feed_fl, feed_fr = front_mid + side, front_mid - side
-    feed_sl, feed_sr = surround, -surround
 
     left = (
         centre * centre_ear
@@ -172,22 +179,32 @@ def test_ms_shortcut_equals_per_speaker_rendering() -> None:
             np.complex128
         )
 
-    centre, front_mid, side, surround = spectrum(), spectrum(), spectrum(), spectrum()
+    centre, front_mid, side = spectrum(), spectrum(), spectrum()
+    # 環繞餵的是兩條互不相關的訊號，不是 ±u —— 推導必須對任意的一對成立。
+    feed_sl, feed_sr = spectrum(), spectrum()
 
     filters = synthetic_filters(SAMPLE_RATE, FFT)
-    fast_mid = centre * filters.centre + front_mid * filters.front_sum
-    fast_side = side * filters.front_diff + surround * filters.surround_diff
+    surround_sum = (feed_sl + feed_sr) * 0.5
+    surround_diff = (feed_sl - feed_sr) * 0.5
+    fast_mid = (
+        centre * filters.centre
+        + front_mid * filters.front_sum
+        + surround_sum * filters.surround_sum
+    )
+    fast_side = side * filters.front_diff + surround_diff * filters.surround_diff
 
-    ref_mid, ref_side = _reference_ms(centre, front_mid, side, surround)
+    ref_mid, ref_side = _reference_ms(centre, front_mid, side, feed_sl, feed_sr)
 
     assert np.allclose(fast_mid, ref_mid)
     assert np.allclose(fast_side, ref_side)
 
 
-def test_shortcut_costs_four_multiplies_per_bin() -> None:
-    """化簡的重點是「只有四條濾波器」。多一條就代表推導被改壞了。
+def test_shortcut_stays_a_handful_of_multiplies_per_bin() -> None:
+    """化簡的重點是濾波器只有少少幾條。多一條就要回頭重測預算。
 
     這條看起來像在數欄位，但它守的是 §9.4 的預算結論：HRTF 之所以塞得下，
-    正是因為它只是每格四次複數乘法，沒有第二組 STFT。
+    正是因為它只是每格幾次複數乘法，沒有第二組 STFT。它已經實際生效過一次
+    —— 環繞從 ±u 改成兩條去相關訊號時多了一條 surround_sum，這條測試因此
+    紅燈，預算也就跟著重測了（§9.10）。
     """
-    assert len(dataclasses.fields(HrtfFilters)) == 4
+    assert len(dataclasses.fields(HrtfFilters)) == 5
