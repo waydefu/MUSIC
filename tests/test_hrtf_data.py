@@ -223,6 +223,8 @@ def test_renderer_reports_which_source_it_uses(tmp_path: Path, monkeypatch) -> N
     """UI 要照實說是實測還是合成，所以這件事必須查得到。"""
     out = tmp_path / "hrtf.npz"
     _convert(_dataset(tmp_path), out)
+    # 兩個位置都要隔離，否則會抓到開發者自己匯入的 profile。
+    monkeypatch.setattr(hrtf_module, "hrtf_dir", lambda: tmp_path / "profiles")
     monkeypatch.setattr(hrtf_module, "hrtf_file", lambda: out)
 
     upmix = SpatialUpmix()
@@ -232,6 +234,7 @@ def test_renderer_reports_which_source_it_uses(tmp_path: Path, monkeypatch) -> N
 
 
 def test_renderer_falls_back_to_synthetic_without_data(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(hrtf_module, "hrtf_dir", lambda: tmp_path / "absent")
     monkeypatch.setattr(hrtf_module, "hrtf_file", lambda: tmp_path / "absent.npz")
 
     upmix = SpatialUpmix()

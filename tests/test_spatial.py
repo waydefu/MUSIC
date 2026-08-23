@@ -15,6 +15,7 @@ import pytest
 from aurora.core.abcompare import compare, estimate_latency_frames
 from aurora.core.constants import SPATIAL_FFT_SIZE, SPATIAL_HOP
 from aurora.core.dsp_graph import DspGraph
+from aurora.core.hrtf import SYNTHETIC_PROFILE
 from aurora.core.spatial import SpatialUpmix
 
 FloatArray = npt.NDArray[np.float32]
@@ -454,7 +455,13 @@ def test_graph_sums_spatial_latency() -> None:
 
 
 def _binaural(amount: float) -> SpatialUpmix:
+    """binaural renderer，**明確釘死用內建合成模型**。
+
+    不釘的話會抓到開發者自己匯入的 HRTF profile —— 那會讓同一套測試在有
+    匯入資料的機器上與 CI 上量到不同的濾波器，綠燈的意義就不穩定了。
+    """
     upmix = SpatialUpmix()
+    upmix.hrtf_profile = SYNTHETIC_PROFILE
     upmix.binaural = True
     upmix.prepare(RATE, CHANNELS, BLOCK)
     upmix.amount = amount

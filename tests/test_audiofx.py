@@ -10,11 +10,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from PySide6.QtCore import QCoreApplication
 
 from aurora.audio.engine import AudioEngine
 from aurora.bridge.audiofx import AudioFxController
+from aurora.core import hrtf as hrtf_module
 from aurora.core.config import Config
 from aurora.core.constants import EQ_BAND_HZ, EQ_GAIN_LIMIT_DB
 from aurora.core.dynamics import Limiter, OutputMeter
@@ -38,7 +41,15 @@ def _app() -> QCoreApplication:
 
 
 @pytest.fixture
-def fx() -> object:
+def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> object:
+    """把 HRTF 的兩個查詢位置指到空目錄。
+
+    不隔離的話，開發者自己匯入過的 profile 會被算進來，同一套測試在
+    有資料的機器上與 CI 上驗的就不是同一件事 —— 這個檔案已經因此紅過
+    一次（`setHrtfProfile` 那條）。
+    """
+    monkeypatch.setattr(hrtf_module, "hrtf_dir", lambda: tmp_path / "hrtf")
+    monkeypatch.setattr(hrtf_module, "hrtf_file", lambda: tmp_path / "hrtf.npz")
     _app()
     engine = AudioEngine()
     config = Config()
@@ -279,7 +290,14 @@ def test_synthetic_is_always_offered_as_a_profile(fx: object) -> None:
 
 
 def test_choosing_a_profile_reaches_the_config(fx: object) -> None:
+    """明確選了合成模型就要記住，即使當下「自動」解析出來也是它。
+
+    這條在 CI 上紅過：原本比的是「解析後生效的那一組」，而沒有匯入任何資料
+    的機器上那本來就是合成模型，於是提早返回、設定沒寫進去。有匯入資料的
+    開發機則會通過 —— 又一個機器相依的測試。現在比的是設定裡存的值。
+    """
     controller, _, config = fx
+    assert config.hrtf_profile == "", "預設應該是「自動」"
     controller.setHrtfProfile("synthetic")
     assert config.hrtf_profile == "synthetic"
     assert controller.hrtfProfile == "synthetic"
