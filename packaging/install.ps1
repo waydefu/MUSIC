@@ -151,7 +151,7 @@ if (-not $NoAssociate) {
 
 # --- 解除安裝資訊 ---------------------------------------------------------
 
-$version = '0.1.0'
+$version = '0.2.0'
 New-Item -Path $UninstallKey -Force | Out-Null
 Set-ItemProperty -Path $UninstallKey -Name 'DisplayName'     -Value $DisplayName
 Set-ItemProperty -Path $UninstallKey -Name 'DisplayVersion'  -Value $version
