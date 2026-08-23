@@ -23,8 +23,22 @@ SOFA 是 HDF5，要讀它得引進 ``h5py``。那是**執行期**相依，會被
     uv run python tools/import_hrtf.py \
         --at 0 azi_0.wav --at 30 azi_30.wav --at 110 azi_110.wav
 
-WAV 必須是**立體聲**：一軌左耳、一軌右耳。哪一軌是近耳由喇叭在哪一側決定，
-工具會依方位角自己判斷（正的方位角＝右側，近耳是右耳）。
+WAV 必須是**立體聲**：一軌左耳、一軌右耳。
+
+## 兩件不能靠文件、只能靠量測的事
+
+**哪一軌是近耳。** 資料集的方位角正方向不一定一致 —— SADIE II 是逆時針，
+所以 +30° 在**左**邊；換一套資料集可能相反。猜錯的話整個音場左右顛倒，
+而那用聽的很難確定是哪一邊錯。所以這裡不看慣例，直接量：**近耳一定先
+收到聲音**。量不出來（兩耳同時）時左右其實等價，隨便挑；兩個方位角互相
+矛盾時就停下來，要求用 ``--near-ear`` 明講。
+
+**共模傳播延遲。** 量測的 HRIR 前面有一段空白（H13 是 102 個取樣 ≈ 2.1 ms），
+那是聲音從喇叭走到頭的時間，兩耳都有。renderer 會把濕訊號與乾訊號交叉
+淡入，濕的被延後而乾的沒有 → 兩者相加就是梳狀濾波（102 個取樣在 48 kHz
+下每 471 Hz 一個凹陷，聽起來很空）。所以匯入時把這段共模延遲切掉，
+**所有位置切掉同樣的量**：兩耳之間的 ITD 與各虛擬喇叭之間的相對時序
+都因此原封不動，只有共同的那一段消失。
 
 轉出來的內容是**近耳／遠耳**而不是左右耳。座標慣例只在這裡處理一次，
 ``core/hrtf.py`` 就不必知道任何資料集的細節。
@@ -58,6 +72,13 @@ _AZIMUTH_RE = re.compile(r"azi[_\-]?(-?\d+(?:[.,]\d+)?)", re.IGNORECASE)
 _ELEVATION_RE = re.compile(r"ele[_\-]?(-?\d+(?:[.,]\d+)?)", re.IGNORECASE)
 #: 量測格點與目標最多差幾度。與 core/hrtf.py 的容差一致。
 _TOLERANCE_DEG = 7.5
+#: 起音判定：包絡首次超過峰值的這個比例。用包絡而不是 argmax —— HRIR 的
+#: 最大值不一定在第一個波前上，尤其耳廓造成的反射會讓後面出現更高的峰。
+_ONSET_THRESHOLD = 0.2
+#: 判定「哪耳先」所需的最小取樣差。小於這個值視為兩耳同時，此時左右等價。
+_LEAD_TOLERANCE = 2
+#: 切掉共模延遲時在最早的起音前面保留幾個取樣，避免削掉波前本身。
+_ONSET_GUARD = 8
 
 
 def read_stereo_wav(path: Path) -> tuple[int, FloatArray, FloatArray]:
@@ -119,31 +140,82 @@ def pick(available: dict[float, Path], target: float) -> Path:
     return available[best]
 
 
-def build(sources: dict[float, Path]) -> dict[str, object]:
+def onset(response: FloatArray) -> int:
+    """波前抵達的取樣位置。
+
+    用**包絡首次超過峰值比例**而不是 ``argmax`` —— HRIR 的最大值不一定落在
+    第一個波前上，耳廓造成的反射常常讓後面出現更高的峰。
+    """
+    envelope = np.abs(response)
+    peak = float(envelope.max())
+    if peak <= 0.0:
+        return 0
+    return int(np.argmax(envelope > peak * _ONSET_THRESHOLD))
+
+
+def detect_near_ear(measured: dict[float, tuple[FloatArray, FloatArray]]) -> str:
+    """從資料量出哪一軌是近耳。**近耳一定先收到聲音。**
+
+    只看非 0° 的方位角：正前方兩耳同時抵達，沒有資訊。回傳 ``"left"`` 或
+    ``"right"``；兩個方位角互相矛盾時拋例外，要求呼叫端明講。
+    """
+    leads: list[int] = []
+    for azimuth, (left, right) in measured.items():
+        if abs(azimuth) < 1e-6:
+            continue
+        leads.append(onset(right) - onset(left))
+
+    if all(lead > _LEAD_TOLERANCE for lead in leads):
+        return "left"
+    if all(lead < -_LEAD_TOLERANCE for lead in leads):
+        return "right"
+    if all(abs(lead) <= _LEAD_TOLERANCE for lead in leads):
+        # 兩耳同時 ⇒ 左右等價，挑哪邊都不影響結果。
+        return "right"
+    raise ValueError(
+        f"各方位角量到的近耳不一致（右耳減左耳的起音差：{leads}）。"
+        "請用 --near-ear left|right 明確指定。"
+    )
+
+
+def build(sources: dict[float, Path], near_ear: str | None = None) -> dict[str, object]:
     """讀出每個方位角的近耳／遠耳 HRIR，組成 npz 的內容。"""
     rates: set[int] = set()
     lengths: set[int] = set()
-    ipsi: list[FloatArray] = []
-    contra: list[FloatArray] = []
+    measured: dict[float, tuple[FloatArray, FloatArray]] = {}
 
     for target in TARGETS:
         rate, left, right = read_stereo_wav(sources[target])
         rates.add(rate)
         lengths.add(left.size)
-        # 正的方位角在右側，所以近耳是右耳。0° 兩耳等價，取哪一邊都行。
-        ipsi.append(right)
-        contra.append(left)
+        measured[target] = (left, right)
 
     if len(rates) != 1:
         raise ValueError(f"各檔案的取樣率不一致：{sorted(rates)}")
     if len(lengths) != 1:
         raise ValueError(f"各檔案的長度不一致：{sorted(lengths)}")
 
+    near = near_ear or detect_near_ear(measured)
+    if near not in ("left", "right"):
+        raise ValueError(f"--near-ear 只能是 left 或 right，收到 {near!r}")
+
+    ipsi = [measured[t][0 if near == "left" else 1] for t in TARGETS]
+    contra = [measured[t][1 if near == "left" else 0] for t in TARGETS]
+
+    # 切掉共模傳播延遲。**所有位置切掉同樣的量**，所以兩耳的 ITD 與各虛擬
+    # 喇叭之間的相對時序都不變，消失的只有共同的那一段（見模組 docstring）。
+    earliest = min(onset(response) for response in (*ipsi, *contra))
+    trim = max(0, earliest - _ONSET_GUARD)
+    ipsi = [response[trim:] for response in ipsi]
+    contra = [response[trim:] for response in contra]
+
     return {
         "sample_rate": np.int32(rates.pop()),
         "azimuths": np.asarray(TARGETS, dtype=np.float64),
         "ipsi": np.asarray(ipsi, dtype=np.float64),
         "contra": np.asarray(contra, dtype=np.float64),
+        "near_ear": near,
+        "trimmed": np.int32(trim),
     }
 
 
@@ -156,6 +228,14 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         metavar=("方位角", "WAV"),
         help="直接指定某個方位角要用哪個檔案。可重複；解析不出檔名時用這個。",
+    )
+    parser.add_argument(
+        "--near-ear",
+        choices=("left", "right"),
+        help=(
+            "正方位角那一側對應哪一軌。預設從 ITD 自己量出來（近耳一定先收到"
+            "聲音），只有量不出來或互相矛盾時才需要指定。"
+        ),
     )
     parser.add_argument("--out", type=Path, help=f"輸出路徑（預設 {hrtf_file()}）")
     options = parser.parse_args(argv)
@@ -179,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"缺少這些方位角的量測：{missing}", file=sys.stderr)
             return 2
 
-        payload = build(sources)
+        payload = build(sources, options.near_ear)
     except (OSError, ValueError, wave.Error) as error:
         print(f"轉換失敗：{error}", file=sys.stderr)
         return 1
@@ -191,6 +271,9 @@ def main(argv: list[str] | None = None) -> int:
     taps = int(payload["ipsi"].shape[1])  # type: ignore[union-attr]
     print(f"寫入 {out}")
     print(f"  取樣率 {int(payload['sample_rate'])} Hz、{taps} 抽頭、方位角 {list(TARGETS)}")
+    how = "量測判定" if options.near_ear is None else "手動指定"
+    print(f"  近耳 = {payload['near_ear']} 軌（{how}）")
+    print(f"  切掉共模延遲 {int(payload['trimmed'])} 個取樣")
     for target in TARGETS:
         print(f"  {target:6.1f}° ← {sources[target].name}")
     return 0
