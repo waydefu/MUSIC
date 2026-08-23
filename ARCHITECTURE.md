@@ -19,9 +19,19 @@ flowchart LR
     Player --> Engine["audio/engine.py<br/>串流、播放、seek"]
     Engine --> Miniaudio["miniaudio<br/>解碼與音訊裝置"]
     Engine --> Analyzer["audio/analyzer.py<br/>頻譜與音質量測"]
+    Engine --> Graph["core/dsp_graph.py<br/>回呼上的處理器級聯"]
+    Graph --> Eq["core/eq.py<br/>十段等化"]
+    Graph --> Spatial["core/spatial.py<br/>虛擬 5.1 + renderer"]
+    Graph --> Reflect["core/reflections.py<br/>早期反射"]
+    Graph --> Dyn["core/dynamics.py<br/>限幅器與輸出電表"]
+    Spatial --> Hrtf["core/hrtf.py<br/>HRTF 濾波器組"]
 
+    Player --> Fx["bridge/audiofx.py<br/>音效 ViewModel"]
+    Fx --> Graph
     Player --> ViewModels["bridge/theme.py<br/>bridge/lyrics.py<br/>bridge/quality.py"]
-    ViewModels --> Platform["platform_win/<br/>Core Audio、藍牙、檔案關聯"]
+    ViewModels --> Adapter["platform/<br/>平台能力契約"]
+    Adapter --> Win["platform_win/<br/>Windows 實作"]
+    Adapter --> Mac["platform/macos.py<br/>macOS 實作"]
 
     Core["core/<br/>設定、常數、資料型別、純邏輯"] --> Player
     Core --> Engine
@@ -44,7 +54,14 @@ flowchart LR
 | 解碼、串流、音訊裝置、seek | Audio engine | `src/aurora/audio/engine.py` |
 | FFT、頻譜、onset、rolloff | Analyzer | `src/aurora/audio/analyzer.py` |
 | 封面色票、歌詞、音質報告 | ViewModels | `src/aurora/bridge/theme.py`, `lyrics.py`, `quality.py` |
-| Windows 端點、藍牙、檔案關聯 | Platform adapter | `src/aurora/platform_win/` |
+| 回呼上的處理器級聯、掛載與降級 | DSP graph | `src/aurora/core/dsp_graph.py` |
+| 等化器、限幅器、輸出電表 | 純邏輯處理器 | `src/aurora/core/eq.py`, `dynamics.py` |
+| 虛擬 5.1、距離感、立體聲／HRTF renderer | Spatial | `src/aurora/core/spatial.py` |
+| 早期反射 | Reflections | `src/aurora/core/reflections.py` |
+| HRTF 濾波器、實測資料載入、頻譜線索強度 | HRTF | `src/aurora/core/hrtf.py` |
+| 音效面板的接線與設定持久化 | 音效 ViewModel | `src/aurora/bridge/audiofx.py` |
+| 端點、藍牙、檔案關聯、系統偏好 | **平台契約** | `src/aurora/platform/`（上層只認識這裡） |
+| Windows 專屬實作（COM、登錄檔） | Windows 實作細節 | `src/aurora/platform_win/`（**不要從上層直接 import**） |
 | UI 與動畫 | Qt Quick | `src/aurora/qml/Main.qml`, `src/aurora/qml/Aurora/` |
 | 設定與共用不可變資料 | Core | `src/aurora/core/` |
 | 安裝、打包、發行 | Tooling | `tools/`, `packaging/`, `aurora.spec` |
@@ -108,7 +125,7 @@ sequenceDiagram
 flowchart TB
     Main["Qt 主執行緒<br/>QML、PlayerController、models"]
     Worker["aurora-metadata daemon thread<br/>mutagen、封面快取"]
-    Audio["miniaudio callback thread<br/>PCM、gain、ring buffer"]
+    Audio["miniaudio callback thread<br/>PCM、DSP graph、gain、ring buffer"]
 
     Main -->|"路徑佇列"| Worker
     Worker -->|"Track 結果佇列"| Main
@@ -117,6 +134,12 @@ flowchart TB
 ```
 
 任何新背景工作都應沿用這個邊界：背景只做 I/O 或純計算，回傳不可變資料；Qt model 與 signal 的狀態變更集中在主執行緒。
+
+**DSP 級聯跑在音訊回呼上**，所以它受同一條規則的更嚴格版本約束：不得配置
+記憶體、不得發 Qt signal、不得取得會被主執行緒持有的鎖。處理器要回報狀態
+（例如限幅器啟動、DSP 降級）時一律設旗標，由 `PlayerController._tick()`
+在主執行緒撈出來 —— 與 `AudioEngine.take_finished` 同一個模式。
+回呼的時間預算與實測數字見 [PROJECT_PLAN.md](PROJECT_PLAN.md) §9.4 與 §9.9。
 
 ## 驗證路線
 

@@ -41,7 +41,6 @@ biquad 是整個預算的 6.5 倍，不是「有點慢」而是完全不可行�
 
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
 
 import numpy as np
@@ -196,6 +195,3 @@ def band_label(index: int) -> str:
         return f"{hz / 1000.0:g}k"
     return f"{hz:g}"
 
-
-def gain_to_linear(db: float) -> float:
-    return float(math.pow(10.0, db / 20.0))

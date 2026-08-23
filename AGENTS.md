@@ -66,7 +66,12 @@ numpy 做 FFT／音質分析。uv 管相依，PyInstaller `onedir` 打包，Powe
    ANSI 代碼頁（繁中是 cp950）解讀，安裝腳本 100% 解析失敗。`make_release.py` 會擋。
 9. **檔案關聯只寫 `HKCU`，而且是「加入開啟方式」不是搶佔預設。** 不提權、不碰 `HKLM`。
    Windows 10 之後不允許程式自行設為預設處理常式，別嘗試繞過。
-10. **`QQuickStyle.setStyle("Basic")` 必須在載入 QML 之前執行。** 原生樣式會靜靜忽略
+10. **DSP 處理器跑在音訊回呼上，不得配置記憶體、不得發 Qt signal。**
+    穩態配置會在回呼裡觸發 GC，那正是尾端延遲的來源（`dsp_graph` 的契約有
+    寫，`bench_callback.py` 會量）。要回報狀態就設旗標，由
+    `PlayerController._tick()` 在主執行緒撈出來 —— 與 `take_finished` 同一個
+    模式。回呼預算與實測數字見 PROJECT_PLAN §9.4 與 §9.9。
+11. **`QQuickStyle.setStyle("Basic")` 必須在載入 QML 之前執行。** 原生樣式會靜靜忽略
     所有自訂繪製，只在主控台留一行警告。
 
 ## 驗證契約
