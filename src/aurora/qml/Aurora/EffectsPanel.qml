@@ -316,6 +316,56 @@ Item {
                     wrapMode: Text.WordWrap
                 }
 
+                // ------------------------------------------------ 耳機空間化
+
+                // 放在空間音效底下而不是另開一段：它換掉的是空間音效的
+                // renderer，空間音效關著時它什麼也不會做。
+                Item {
+                    width: parent.width
+                    height: 30
+                    opacity: spatialSlider.value > 0.005 ? 1.0 : 0.4
+
+                    Behavior on opacity { NumberAnimation { duration: Motion.panel } }
+
+                    Text {
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: Strings.binaural
+                        color: "white"
+                        font.pixelSize: 13.5 * Appearance.fontScale
+                    }
+
+                    Switch {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        checked: root.controller ? root.controller.binauralEnabled : false
+                        onToggled: if (root.controller) root.controller.setBinauralEnabled(checked)
+                    }
+                }
+
+                Text {
+                    width: parent.width
+                    text: Strings.binauralHint
+                    color: Qt.rgba(1, 1, 1, 0.42)
+                    font.pixelSize: 12.5 * Appearance.fontScale
+                    wrapMode: Text.WordWrap
+                }
+
+                // 合成模型與實測資料的差別要照實講。合成的沒有耳廓、前後
+                // 分不出來，冒充完成品只會讓人以為功能壞了。
+                Text {
+                    width: parent.width
+                    visible: root.controller ? root.controller.binauralEnabled : false
+                    text: (root.controller && root.controller.hrtfIsMeasured)
+                        ? Strings.binauralMeasured
+                        : Strings.binauralSynthetic
+                    color: (root.controller && root.controller.hrtfIsMeasured)
+                        ? root.accent
+                        : Qt.rgba(1, 1, 1, 0.42)
+                    font.pixelSize: 12.5 * Appearance.fontScale
+                    wrapMode: Text.WordWrap
+                }
+
                 Text {
                     width: parent.width
                     visible: root.controller ? root.controller.limiterEngaged : false

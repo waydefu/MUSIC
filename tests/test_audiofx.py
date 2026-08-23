@@ -236,3 +236,37 @@ def test_poll_surfaces_a_degraded_graph(fx: object) -> None:
     # 事件只該回報一次，不然每個 UI 幀都會跳一次提示。
     controller.poll()
     assert len(seen) == 1
+
+
+# ------------------------------------------------------------------ 耳機空間化
+
+
+def test_binaural_is_off_by_default(fx: object) -> None:
+    """它是給耳機用的，用喇叭聽只是多一層處理。預設關閉。"""
+    controller, _, _ = fx
+    assert not controller.binauralEnabled
+
+
+def test_toggling_binaural_reaches_the_processor_and_the_config(fx: object) -> None:
+    controller, _, config = fx
+    controller.setBinauralEnabled(True)
+    assert controller.binauralEnabled
+    assert config.binaural
+
+
+def test_binaural_does_not_install_a_stage_by_itself(fx: object) -> None:
+    """它換掉的是空間音效的 renderer，不是新的一級。
+
+    空間音效關著時打開它不該讓 graph 多出東西 —— 否則使用者只是好奇按了
+    開關，就白白付了一整級 STFT 的成本。
+    """
+    controller, engine, _ = fx
+    controller.setBinauralEnabled(True)
+    assert engine.graph.stages == ()
+
+
+def test_binaural_reports_the_synthetic_model_without_imported_data(fx: object) -> None:
+    """沒有匯入資料時要照實說是合成模型，不能冒充完成品。"""
+    controller, _, _ = fx
+    controller.setBinauralEnabled(True)
+    assert not controller.hrtfIsMeasured
