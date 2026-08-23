@@ -83,6 +83,8 @@ import numpy.typing as npt
 
 from aurora.core.constants import (
     HEAD_RADIUS_M,
+    HRTF_EQ_LIMIT_DB,
+    HRTF_EQ_SMOOTHING_OCTAVE,
     HRTF_FRONT_AZIMUTH_DEG,
     HRTF_MAX_TAP_RATIO,
     HRTF_SHADOW_MIN_GAIN,
@@ -140,6 +142,47 @@ class HrtfFilters:
             surround_diff=(surround_ipsi - surround_contra) * half,
         )
 
+    def diffuse_field_equalised(self) -> HrtfFilters:
+        """除掉方向無關的共同響應，只留下各方向之間的差異。
+
+        **為什麼非做不可。** HRTF 量測裡包含耳道與耳廓本身的頻率響應，但
+        使用者戴耳機聽的時候那顆真耳還在 —— 等於同一個響應被套了兩次。
+        實測 H13 的共同響應相對 500 Hz 是：63 Hz −6.6 dB、125 Hz −6.4 dB、
+        8 kHz −4.0 dB。那一段**完全不帶方向資訊**，卻整個乘在訊號上，
+        實聽的結果就是「變悶、沒有通透感、低頻不見」。
+
+        方向資訊全部藏在各方向之間的**差異**裡，所以除掉共同成分不會損失
+        任何定位線索 —— 這也是為什麼擴散場等化是雙耳渲染的標準步驟，
+        不是可選的精修。
+
+        共同響應取五條路徑（中央、前方近／遠耳、環繞近／遠耳）的能量平均，
+        那正是「內容平均散布在這個喇叭佈局上」時耳朵收到的東西。
+        """
+        paths = np.stack(
+            [
+                self.centre,
+                self.front_sum + self.front_diff,
+                self.front_sum - self.front_diff,
+                self.surround_sum + self.surround_diff,
+                self.surround_sum - self.surround_diff,
+            ]
+        )
+        common = _smooth_octaves(np.sqrt(np.mean(np.abs(paths) ** 2, axis=0)))
+        reference = float(np.median(common))
+        if reference <= _EPS:
+            return self
+
+        limit = 10.0 ** (HRTF_EQ_LIMIT_DB / 20.0)
+        correction = np.clip(reference / np.maximum(common, _EPS), 1.0 / limit, limit)
+        # 只動 magnitude。相位帶著 ITD，碰它等於改掉方向。
+        return HrtfFilters(
+            centre=self.centre * correction,
+            front_sum=self.front_sum * correction,
+            front_diff=self.front_diff * correction,
+            surround_sum=self.surround_sum * correction,
+            surround_diff=self.surround_diff * correction,
+        )
+
     def __post_init__(self) -> None:
         sizes = {
             self.centre.size,
@@ -150,6 +193,24 @@ class HrtfFilters:
         }
         if len(sizes) != 1:
             raise ValueError(f"五條濾波器長度必須相同，收到 {sizes}")
+
+
+def _smooth_octaves(magnitude: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """對數頻率上的分數八度平滑（能量平均）。
+
+    用累積和一次算完，避免 1025 格各跑一次迴圈。第 0 格（DC）沒有八度可言，
+    照原值留著 —— 它只影響直流偏移。
+    """
+    power = np.square(magnitude, dtype=np.float64)
+    cumulative = np.concatenate(([0.0], np.cumsum(power)))
+    index = np.arange(magnitude.size, dtype=np.float64)
+    ratio = 2.0 ** (HRTF_EQ_SMOOTHING_OCTAVE / 2.0)
+    low = np.maximum(0, np.floor(index / ratio)).astype(np.int64)
+    high = np.minimum(magnitude.size, np.ceil(index * ratio).astype(np.int64) + 1)
+    width = np.maximum(high - low, 1)
+    smoothed = np.sqrt((cumulative[high] - cumulative[low]) / width)
+    smoothed[0] = magnitude[0]
+    return np.asarray(smoothed, dtype=np.float64)
 
 
 def ear_pair(
@@ -216,7 +277,7 @@ def synthetic_filters(sample_rate: int, fft_size: int) -> HrtfFilters:
         centre=centre,
         front=ear_pair(sample_rate, fft_size, HRTF_FRONT_AZIMUTH_DEG),
         surround=ear_pair(sample_rate, fft_size, HRTF_SURROUND_AZIMUTH_DEG),
-    )
+    ).diffuse_field_equalised()
 
 
 def interaural_delay_sec(azimuth_deg: float) -> float:
@@ -232,6 +293,8 @@ def interaural_delay_sec(azimuth_deg: float) -> float:
 
 # ---------------------------------------------------------------- 實測資料
 
+#: 避免除以零。
+_EPS = 1e-12
 #: 一對喇叭裡每一支承擔的份額。場景給一對的權重是 1，而 H_sum 在低頻
 #: 趨近 2·H_0，所以要各半才回到場景的能量分配。
 _PAIR_SHARE = 0.5
@@ -311,6 +374,7 @@ def load_filters(sample_rate: int, fft_size: int, path: Path | None = None) -> H
         return None
 
     try:
-        return HrtfFilters.from_ear_pairs(centre=centre[0], front=front, surround=surround)
+        filters = HrtfFilters.from_ear_pairs(centre=centre[0], front=front, surround=surround)
     except ValueError:
         return None
+    return filters.diffuse_field_equalised()
