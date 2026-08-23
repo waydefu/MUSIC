@@ -202,3 +202,14 @@ def test_binaural_coerces_junk_to_a_bool() -> None:
     """設定檔被手改壞時只能退回可用狀態，不能讓 App 開不起來。"""
     assert Config.from_dict({"binaural": "yes"}).binaural is True
     assert Config.from_dict({"binaural": None}).binaural is False
+
+
+def test_hrtf_profile_survives_a_round_trip() -> None:
+    config = Config()
+    config.hrtf_profile = "ku100"
+    assert Config.from_dict(config.to_dict()).hrtf_profile == "ku100"
+
+
+def test_hrtf_profile_coerces_junk_to_empty() -> None:
+    """壞掉的設定檔只能退回「自動」，不能讓 App 開不起來。"""
+    assert Config.from_dict({"hrtf_profile": None}).hrtf_profile == ""

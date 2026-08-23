@@ -91,7 +91,7 @@ from aurora.core.constants import (
     HRTF_SURROUND_AZIMUTH_DEG,
     SOUND_SPEED_MPS,
 )
-from aurora.core.paths import hrtf_file
+from aurora.core.paths import hrtf_dir, hrtf_file
 
 ComplexArray = npt.NDArray[np.complex128]
 
@@ -331,6 +331,63 @@ def _resample(response: npt.NDArray[np.float64], source_rate: int, target_rate: 
         return response
     length = max(1, round(response.size * target_rate / source_rate))
     return np.asarray(np.fft.irfft(np.fft.rfft(response), n=length), dtype=np.float64)
+
+
+#: 內建合成模型的 profile 名稱。使用者要能明確選它 —— A/B 比較「真人資料
+#: 到底有沒有比較好」是這個功能存在的理由之一。
+SYNTHETIC_PROFILE = "synthetic"
+
+
+def available_profiles() -> tuple[str, ...]:
+    """使用者已匯入的 profile 名稱，依字母排序。
+
+    舊版的單檔 ``hrtf.npz`` 會以 ``imported`` 的名字出現，這樣已經匯入過的
+    人升級之後不會突然找不到自己的資料。
+    """
+    names: set[str] = set()
+    try:
+        directory = hrtf_dir()
+        if directory.is_dir():
+            names.update(item.stem for item in directory.glob("*.npz") if item.is_file())
+    except OSError:
+        pass
+    try:
+        if hrtf_file().is_file():
+            names.add("imported")
+    except OSError:
+        pass
+    names.discard(SYNTHETIC_PROFILE)
+    return tuple(sorted(names))
+
+
+def profile_path(name: str) -> Path | None:
+    """profile 名稱對應的檔案。找不到回傳 ``None``。"""
+    if not name or name == SYNTHETIC_PROFILE:
+        return None
+    try:
+        candidate = hrtf_dir() / f"{name}.npz"
+        if candidate.is_file():
+            return candidate
+        legacy = hrtf_file()
+        if name == "imported" and legacy.is_file():
+            return legacy
+    except OSError:
+        return None
+    return None
+
+
+def resolve_profile(name: str) -> Path | None:
+    """把設定裡的 profile 名稱解析成檔案路徑。
+
+    空字串是**自動**：有匯入過就用第一組，沒有就用合成模型。這讓已經匯入
+    過的使用者升級後行為不變，而不是突然掉回合成模型。
+    """
+    if name == SYNTHETIC_PROFILE:
+        return None
+    if name:
+        return profile_path(name)
+    profiles = available_profiles()
+    return profile_path(profiles[0]) if profiles else None
 
 
 def load_filters(sample_rate: int, fft_size: int, path: Path | None = None) -> HrtfFilters | None:

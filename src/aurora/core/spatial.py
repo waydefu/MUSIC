@@ -69,7 +69,12 @@ from aurora.core.constants import (
     SPATIAL_SURROUND_LEVEL,
     SPATIAL_WIDTH,
 )
-from aurora.core.hrtf import HrtfFilters, load_filters, synthetic_filters
+from aurora.core.hrtf import (
+    HrtfFilters,
+    load_filters,
+    resolve_profile,
+    synthetic_filters,
+)
 
 FloatArray = npt.NDArray[np.float32]
 
@@ -102,6 +107,7 @@ class SpatialUpmix:
         self._binaural = False
         self._hrtf: HrtfFilters | None = None
         self._hrtf_measured = False
+        self._hrtf_profile = ""
         self._sample_rate = 0
 
         # sqrt-Hann 用於分析與合成。平方後就是 Hann，而 Hann 在 50% 重疊下
@@ -186,12 +192,26 @@ class SpatialUpmix:
         """
         return self._hrtf_measured
 
+    @property
+    def hrtf_profile(self) -> str:
+        """目前選用的 HRTF profile。空字串＝自動，``"synthetic"``＝內建模型。"""
+        return self._hrtf_profile
+
+    @hrtf_profile.setter
+    def hrtf_profile(self, name: str) -> None:
+        self._hrtf_profile = str(name)
+        if self._binaural and self._sample_rate:
+            self._load_hrtf(self._sample_rate)
+
     def _load_hrtf(self, sample_rate: int) -> None:
-        """優先用實測資料，沒有或壞掉就退回合成模型。
+        """依 profile 載入實測資料，沒有或壞掉就退回合成模型。
 
         ``load_filters`` 保證不拋例外：缺檔案是正常狀態，不是錯誤。
+        選了一個不存在的 profile 也一樣降級 —— 使用者刪掉檔案之後
+        播放器不該就此打不開。
         """
-        measured = load_filters(sample_rate, self._fft)
+        path = resolve_profile(self._hrtf_profile)
+        measured = load_filters(sample_rate, self._fft, path) if path is not None else None
         self._hrtf_measured = measured is not None
         self._hrtf = measured or synthetic_filters(sample_rate, self._fft)
 

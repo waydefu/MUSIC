@@ -76,6 +76,9 @@ class Config:
     #: 耳機空間化（P2 HRTF renderer）。預設關閉 —— 它是給耳機用的，
     #: 用喇叭聽會多一層不需要的處理。
     binaural: bool = False
+    #: 選用的 HRTF profile。空字串＝自動（有匯入就用第一組）、
+    #: ``synthetic``＝內建合成模型。其餘是使用者匯入的檔名。
+    hrtf_profile: str = ""
 
     # ---------------------------------------------------------- 序列化
 
@@ -141,6 +144,7 @@ class Config:
         self.eq_gains = gains if len(gains) == len(EQ_BAND_HZ) else [0.0] * len(EQ_BAND_HZ)
         self.spatial_amount = min(max(float(self.spatial_amount), 0.0), 1.0)
         self.binaural = bool(self.binaural)
+        self.hrtf_profile = str(self.hrtf_profile or "")
 
         self.window.width = max(720, int(self.window.width))
         self.window.height = max(480, int(self.window.height))

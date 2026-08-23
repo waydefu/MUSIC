@@ -351,6 +351,55 @@ Item {
                     wrapMode: Text.WordWrap
                 }
 
+                // HRTF 設定檔。只有匯入過才值得顯示 —— 只有一個選項的下拉選單
+                // 是純粹的干擾。
+                Item {
+                    width: parent.width
+                    height: 34
+                    visible: root.controller
+                        ? (root.controller.binauralEnabled
+                           && root.controller.hrtfProfiles.length > 1)
+                        : false
+
+                    Text {
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: Strings.hrtfProfile
+                        color: "white"
+                        font.pixelSize: 13.5 * Appearance.fontScale
+                    }
+
+                    ComboBox {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Math.min(180, parent.width * 0.55)
+                        model: root.controller ? root.controller.hrtfProfiles : []
+                        // 內建模型的內部名稱是 synthetic，畫面上要講人話。
+                        displayText: currentText === "synthetic"
+                            ? Strings.hrtfProfileSynthetic
+                            : currentText
+                        currentIndex: root.controller
+                            ? Math.max(0, root.controller.hrtfProfiles.indexOf(
+                                root.controller.hrtfProfile))
+                            : 0
+                        onActivated: if (root.controller) {
+                            root.controller.setHrtfProfile(textAt(index))
+                        }
+                    }
+                }
+
+                Text {
+                    width: parent.width
+                    visible: root.controller
+                        ? (root.controller.binauralEnabled
+                           && root.controller.hrtfProfiles.length > 1)
+                        : false
+                    text: Strings.hrtfProfileHint
+                    color: Qt.rgba(1, 1, 1, 0.42)
+                    font.pixelSize: 12.5 * Appearance.fontScale
+                    wrapMode: Text.WordWrap
+                }
+
                 // 合成模型與實測資料的差別要照實講。合成的沒有耳廓、前後
                 // 分不出來，冒充完成品只會讓人以為功能壞了。
                 Text {
