@@ -326,9 +326,7 @@ def _ear_response(
     # 所以這裡各分一半 —— 近耳提早、遠耳延後，相減剛好還原成 τ。
     # 寫成 ±half 而不是「近耳 0、遠耳 τ」，是為了讓正前方的兩耳完全對稱，
     # 否則整個場景會被一個共同延遲往一邊拖。
-    # 公式只在 |θ| ≤ 90° 有效；環繞喇叭在 110°，繞射路徑不再變長，用邊界值延伸。
-    clamped = min(theta, math.pi / 2)
-    half = 0.5 * (HEAD_RADIUS_M / SOUND_SPEED_MPS) * (clamped + math.sin(clamped))
+    half = 0.5 * interaural_delay_sec(azimuth_deg)
     delay = -half if ipsilateral else half
 
     # Brown–Duda 單極點頭部遮蔽。ω0 = c/a 是頭的特徵頻率（3.9 krad/s ≈ 620 Hz，
@@ -367,12 +365,17 @@ def synthetic_filters(sample_rate: int, fft_size: int) -> HrtfFilters:
 def interaural_delay_sec(azimuth_deg: float) -> float:
     """Woodworth ITD（秒）：遠耳比近耳晚多少。
 
-    公開出來是給測試與診斷用的 —— renderer 內部不需要它，ITD 已經在
-    :attr:`HrtfFilters.front_diff` 的相位裡。90° 時約 660 µs，
-    這個量級是這個模型對不對的第一個檢查點。
+    合成模型的 :func:`_ear_response` 也用它，所以這裡就是模型的 ITD。
+    90° 時約 660 µs，這個量級是這個模型對不對的第一個檢查點。
+
+    公式本身只寫到 90°。**後半球要對兩耳連線鏡射**，不是延用 90° 的值：
+    兩耳在球的兩端，θ 與 180° − θ 繞過頭的路程完全一樣（這正是「混淆錐」
+    的來源）。以前用邊界值延伸，110° 的環繞喇叭拿到 656 µs，比正確的
+    551 µs（= 70° 的值）多了 19%。
     """
-    theta = min(math.radians(abs(azimuth_deg)), math.pi / 2)
-    return (HEAD_RADIUS_M / SOUND_SPEED_MPS) * (theta + math.sin(theta))
+    theta = math.radians(min(abs(azimuth_deg), 180.0))
+    lateral = theta if theta <= math.pi / 2 else math.pi - theta
+    return (HEAD_RADIUS_M / SOUND_SPEED_MPS) * (lateral + math.sin(lateral))
 
 
 # ---------------------------------------------------------------- 實測資料
@@ -489,11 +492,12 @@ def load_filters(sample_rate: int, fft_size: int, path: Path | None = None) -> H
 
     if source_rate <= 0 or ipsi.shape != contra.shape or ipsi.shape[0] != azimuths.size:
         return None
-    if ipsi.shape[1] > fft_size * HRTF_MAX_TAP_RATIO:
-        # 太長的濾波器會在頻域相乘時繞回框首（見 HRTF_MAX_TAP_RATIO）。
-        return None
+    # 長度上限要在**重取樣之後**檢查：上限的意義是「不能超過 STFT 視窗的
+    # 一定比例」，而視窗是以引擎取樣率的樣本數計的。以前拿原始長度比，
+    # 44.1k→48k 的 512 抽頭變成 557、48k→192k 變成 2048（整個視窗）都照收。
+    limit = fft_size * HRTF_MAX_TAP_RATIO
 
-    def pair_at(azimuth: float) -> tuple[ComplexArray, ComplexArray] | None:
+    def pair_at(azimuth: float) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]] | None:
         # 資料集的量測格點不一定剛好落在 30°／110°，取最近的一個。
         # 差太多就不要硬用 —— 那已經不是這個方位角的響應了。
         index = int(np.argmin(np.abs(azimuths - azimuth)))
@@ -501,12 +505,10 @@ def load_filters(sample_rate: int, fft_size: int, path: Path | None = None) -> H
             return None
         near = _resample(ipsi[index], source_rate, sample_rate)
         far = _resample(contra[index], source_rate, sample_rate)
-        if near.size > fft_size or far.size > fft_size:
+        if near.size > limit or far.size > limit:
+            # 太長的濾波器會在頻域相乘時繞回框首（見 HRTF_MAX_TAP_RATIO）。
             return None
-        return (
-            np.asarray(np.fft.rfft(near, n=fft_size), dtype=np.complex128),
-            np.asarray(np.fft.rfft(far, n=fft_size), dtype=np.complex128),
-        )
+        return near, far
 
     centre = pair_at(0.0)
     front = pair_at(HRTF_FRONT_AZIMUTH_DEG)
@@ -514,8 +516,25 @@ def load_filters(sample_rate: int, fft_size: int, path: Path | None = None) -> H
     if centre is None or front is None or surround is None:
         return None
 
+    # 把**置中路徑**對齊到時間零點。renderer 在 amount < 1 時把乾訊號與
+    # HRTF 路徑相加，兩者差一點延遲就是梳狀濾波：匯入工具切掉共模延遲後，
+    # 置中 HRIR 仍比最早到的近耳晚約半個 ITD 加護欄（48k 下約 24 個取樣，
+    # 0.5 ms），實測 amount=0.5 時置中內容有 −9.4～+2.7 dB 的起伏。
+    # 所有濾波器乘上**同一個**相位斜坡（環形平移），方向線索（兩耳之間、
+    # 喇叭之間的相對時序）完全不變；比置中更早到的近耳因此落在負時間，
+    # 與合成模型的慣例一致（它的近耳本來就是 −半個 ITD）。
+    align = int(np.argmax(np.abs(centre[0])))
+    advance = np.exp(2j * np.pi * np.arange(fft_size // 2 + 1) * align / fft_size)
+
+    def spectrum(response: npt.NDArray[np.float64]) -> ComplexArray:
+        return np.asarray(np.fft.rfft(response, n=fft_size) * advance, dtype=np.complex128)
+
     try:
-        filters = HrtfFilters.from_ear_pairs(centre=centre[0], front=front, surround=surround)
+        filters = HrtfFilters.from_ear_pairs(
+            centre=spectrum(centre[0]),
+            front=(spectrum(front[0]), spectrum(front[1])),
+            surround=(spectrum(surround[0]), spectrum(surround[1])),
+        )
     except ValueError:
         return None
     return filters.layout_equalised()

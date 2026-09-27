@@ -266,10 +266,12 @@ def test_hard_panned_source_keeps_its_position() -> None:
     後者去相關，它就會漏到另一個聲道，定位被抹散。修正前實測有 39.5% 的
     能量跑到原本靜音的右聲道。
 
-    Avendaño 與 Jot 的 upmix 框架同時使用 inter-channel coherence 與
-    panning index，兩者缺一不可；章程 §1.3 從 Sennheiser 學到的
-    「mix intent preservation」講的是同一件事 —— 混音師把樂器擺在左邊
-    是有意圖的，處理器不該把它搬走。
+    章程 §1.3 從 Sennheiser 學到的「mix intent preservation」講的是同一件事
+    —— 混音師把樂器擺在左邊是有意圖的，處理器不該把它搬走。
+
+    當時靠一道 panning 閘門另外擋；現在每一格做直達／環境的特徵分解，
+    R 恆為 0 時次特徵值是 0，整格都被認成直達聲，不需要額外的閘門。
+    偏位但不是硬定位的樂器見 :func:`test_partially_panned_instrument_keeps_its_image`。
     """
     rng = np.random.default_rng(5)
     source = rng.standard_normal(65536) * 0.35
@@ -354,6 +356,122 @@ def test_transients_are_not_smeared_badly() -> None:
     near = np.abs(left[max(0, peak - 256) : peak + 256])
     total = np.abs(left)
     assert near.sum() > total.sum() * 0.8
+
+
+@pytest.mark.parametrize("binaural", [False, True], ids=["stereo", "binaural"])
+def test_diffuse_transient_has_no_pre_echo(binaural: bool) -> None:
+    """**擴散的瞬態（拍手、鈸、房間裡的小鼓）不可以提前出聲。**
+
+    上面那條用的是置中脈衝，side 恆為 0，根本不經過環繞路徑 —— 所以它一路
+    是綠的，而環繞路徑的隨機相位去相關器其實在瞬態前 25 ms 就開始出聲：
+    那種濾波器的脈衝響應鋪滿整個視窗，頻域相乘又是環形卷積，一半的能量
+    繞到了負時間。實測瞬態前 2–40 ms 的能量從輸入的 −30.8 dB 被抬到 −11.1 dB。
+    """
+    rng = np.random.default_rng(21)
+    frames = RATE * 3
+    onset = RATE * 2
+    burst = 96  # 2 ms
+    bed = rng.standard_normal((frames, 2)) * 10 ** (-50 / 20)
+    bed[onset : onset + burst] += rng.standard_normal((burst, 2)) * 0.5
+    signal = bed.astype(np.float32).reshape(-1)
+
+    upmix = _binaural(1.0) if binaural else _make(1.0)
+    output = _run(upmix, signal)[LATENCY * CHANNELS :].reshape(-1, CHANNELS)
+    source = signal.reshape(-1, CHANNELS)
+
+    before = slice(onset - int(0.040 * RATE), onset - int(0.002 * RATE))
+    reference = float(np.sum(np.square(source[onset : onset + burst], dtype=np.float64)))
+    leaked = float(np.sum(np.square(output[before], dtype=np.float64)))
+    assert 10.0 * np.log10(leaked / reference) < -25.0
+
+
+def test_partially_panned_instrument_keeps_its_image() -> None:
+    """**偏位的乾樂器既不可以被打散，也不可以被推走。**
+
+    硬定位（上面那條）只是極端；真實混音裡大多是偏 30%～70% 的吉他、
+    鍵盤。以前的「coherence」其實是 Avendaño 的 similarity，會把這類樂器
+    當成一半的環境音：全開時偏左 6 dB 的乾聲源左右相關從 1.000 掉到 0.362；
+    距離機制又只壓 mid、不壓 side，把它往外推到 ILD 10.9 dB。
+    """
+    rng = np.random.default_rng(22)
+    source = rng.standard_normal(RATE * 3) * 0.3
+    signal = _stereo(source, source * 0.5)  # ILD 6.02 dB
+
+    output = _run(_make(1.0), signal)[LATENCY * CHANNELS :]
+    left, right = _channels_of(output)
+    steady = slice(RATE, 2 * RATE)
+    ild = 20.0 * np.log10(_rms(left[steady]) / _rms(right[steady]))
+
+    assert ild == pytest.approx(20.0 * np.log10(2.0), abs=0.5)
+    assert _correlation(left[steady], right[steady]) > 0.95
+
+
+def test_time_difference_stereo_is_not_comb_filtered() -> None:
+    """AB 麥克風錄的時間差立體聲不可以被染成梳狀。
+
+    以前的判定用 ``Re(L·R*)``：右聲道晚 0.5 ms 時它在 1 kHz 是 −1、2 kHz 是
+    +1，同一個聲源被一格一格輪流當成「置中」與「反相」處理，左聲道本身
+    （沒有任何梳狀）的頻響被弄出 16.9 dB 的起伏。
+    """
+    rng = np.random.default_rng(23)
+    source = rng.standard_normal(RATE * 3) * 0.3
+    delay = 24  # 0.5 ms
+    signal = _stereo(source, np.concatenate([np.zeros(delay), source[:-delay]]))
+
+    output = _run(_make(1.0), signal)[LATENCY * CHANNELS :]
+    left, _ = _channels_of(output)
+    original, _ = _channels_of(signal)
+
+    def spectrum(samples: np.ndarray) -> np.ndarray:
+        segment = samples[RATE : 2 * RATE]
+        magnitude = np.abs(np.fft.rfft(segment * np.hanning(segment.size)))
+        return np.convolve(magnitude, np.ones(40) / 40, mode="same")
+
+    freqs = np.fft.rfftfreq(RATE, 1.0 / RATE)
+    band = (freqs > 300.0) & (freqs < 4000.0)
+    response = 20.0 * np.log10(spectrum(left)[band] / spectrum(original)[band])
+    assert response.max() - response.min() < 1.5
+
+
+def test_tonal_stereo_content_is_not_coloured() -> None:
+    """有音高的立體聲內容（合成器鋪底、chorus）每個音都要被同樣對待。
+
+    以前的環繞是「把隨機相位副本加回 side」，那其實是乘上 ``1 + g·D``：
+    每一格的增益落在 ``|1 − g|``～``1 + g`` 之間。實測 40 個音高的增益散佈
+    在 −20～+9 dB（標準差 5 dB）—— 平均上的「以功率相加」掩蓋了每個音
+    都被隨機等化的事實。
+    """
+    rng = np.random.default_rng(24)
+    t = np.arange(RATE * 4) / RATE
+    pitches = np.round(np.geomspace(400.0, 8000.0, 40))  # 整數 Hz，1 秒 FFT 剛好落在格點
+    side = sum(np.sin(2 * np.pi * f * t + rng.uniform(0, 2 * np.pi)) for f in pitches) * 0.02
+    mid = sum(np.sin(2 * np.pi * f * t + rng.uniform(0, 2 * np.pi)) for f in pitches) * 0.02
+    signal = _stereo(mid + side, mid - side)
+
+    output = _run(_widen_only(1.0), signal)[LATENCY * CHANNELS :]
+    left, _ = _channels_of(output)
+    original, _ = _channels_of(signal)
+
+    def levels(samples: np.ndarray) -> np.ndarray:
+        spectrum = np.abs(np.fft.rfft(samples[2 * RATE : 3 * RATE]))
+        return np.array([spectrum[int(f)] for f in pitches])
+
+    gains = 20.0 * np.log10(levels(left) / levels(original))
+    assert float(np.std(gains)) < 1.0
+
+
+@pytest.mark.parametrize(("rate", "window"), [(44100, 2048), (48000, 2048), (96000, 4096), (192000, 8192)])
+def test_window_follows_the_sample_rate(rate: int, window: int) -> None:
+    """視窗長度以**秒**為準，不以樣本數為準。
+
+    固定 2048 框的話 192k 下視窗只剩 10.7 ms、平滑時間常數從 131 ms 縮到
+    33 ms —— 同一個滑桿在高取樣率端點上是另一種聲音；每次回呼也要多跑
+    4 倍的 hop，而 hop 數正是這條鏈的成本主因。
+    """
+    upmix = SpatialUpmix()
+    upmix.prepare(rate, CHANNELS, rate * 60 // 1000)
+    upmix.amount = 1.0
+    assert upmix.latency_frames == window
 
 
 # ------------------------------------------------------------------ 音量與 A/B

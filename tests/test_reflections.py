@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 import numpy.typing as npt
+import pytest
 
 from aurora.core.constants import (
     HRTF_SURROUND_AZIMUTH_DEG,
@@ -207,6 +208,44 @@ def test_reflections_carry_no_low_frequency_content() -> None:
     low = spectrum[freqs < 100.0].max()
     mid = spectrum[(freqs > 500.0) & (freqs < 4000.0)].max()
     assert low < mid * 0.2
+
+
+@pytest.mark.parametrize("rate", [96000, 192000])
+def test_high_sample_rates_keep_low_frequencies_out(rate: int) -> None:
+    """帶通的長度是時間，不是樣本數。
+
+    固定 257 抽頭的話，96k 下頻率解析度只剩一半，300 Hz 的高通在 100 Hz
+    只抑制到約 0.3 —— 低頻反射在高取樣率端點上又回來了，而 Windows 共用
+    混音器的預設格式本來就可以是 96k 或 192k。
+    """
+    node = EarlyReflections()
+    node.prepare(rate, CHANNELS, rate * 60 // 1000)
+    node.amount = 1.0
+    output = _run(node, _impulse(1 << 16))
+    left, right = _channels_of(output)
+    first = int(REFLECTION_TAP_MS[0] * rate / 1000.0)
+    region = (left + right)[first - 16 :]
+
+    spectrum = np.abs(np.fft.rfft(region))
+    freqs = np.fft.rfftfreq(region.size, 1.0 / rate)
+    low = spectrum[freqs < 100.0].max()
+    mid = spectrum[(freqs > 500.0) & (freqs < 4000.0)].max()
+    assert low < mid * 0.2
+
+
+def test_switching_back_on_does_not_replay_old_audio() -> None:
+    """關著的時候延遲線不前進，裡面留的是上次開著時的東西。
+
+    不清掉的話，從 0 拉回來的那一刻會聽到不知道多久以前的反射。
+    """
+    node = _make(1.0)
+    # 脈衝只往前推 256 框就關掉 —— 它還在 11/23 ms 的延遲線裡。
+    _run(node, _impulse(256))
+    node.amount = 0.0
+    node.amount = 1.0
+
+    silence = np.zeros(BLOCK * CHANNELS, dtype=np.float32)
+    assert np.abs(_run(node, silence)).max() == 0.0
 
 
 def test_reset_clears_the_delay_line() -> None:

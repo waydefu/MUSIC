@@ -41,7 +41,7 @@ QtObject {
     readonly property string headroom: "自動餘裕"
     readonly property string addedLatency: "額外延遲"
     readonly property string effectsOff: "關閉時完全不處理訊號，也不會有延遲。"
-    readonly property string limiterEngaged: "限幅器曾經作動 —— 上游有訊號超出餘裕"
+    readonly property string limiterEngaged: "限幅器曾經作動 —— 有峰值超過 −0.5 dBFS，已被壓到安全範圍"
     readonly property string fxDegraded: "音效發生錯誤，已自動停用"
 
     // 空狀態

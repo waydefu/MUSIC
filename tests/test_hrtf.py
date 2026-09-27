@@ -57,11 +57,17 @@ def test_itd_matches_woodworth() -> None:
     assert interaural_delay_sec(30.0) == pytest.approx(261e-6, abs=10e-6)
 
 
-def test_itd_grows_with_azimuth_then_saturates() -> None:
-    """Woodworth 只在 |θ| ≤ 90° 有效，之後用邊界值延伸。"""
+def test_itd_grows_to_the_side_then_mirrors_behind() -> None:
+    """Woodworth 只寫到 90°；後半球要對兩耳連線鏡射。
+
+    兩耳在球的兩端，θ 與 180° − θ 繞過頭的路程一樣長。以前用 90° 的值延伸，
+    110° 的環繞喇叭拿到 656 µs，比正確的 551 µs 多 19%。
+    """
     values = [interaural_delay_sec(deg) for deg in (0, 15, 30, 60, 90)]
     assert values == sorted(values)
-    assert interaural_delay_sec(110.0) == pytest.approx(interaural_delay_sec(90.0))
+    assert interaural_delay_sec(110.0) == pytest.approx(interaural_delay_sec(70.0))
+    assert interaural_delay_sec(110.0) == pytest.approx(551e-6, abs=5e-6)
+    assert interaural_delay_sec(180.0) == pytest.approx(0.0, abs=1e-12)
 
 
 def test_left_and_right_are_mirror_images() -> None:

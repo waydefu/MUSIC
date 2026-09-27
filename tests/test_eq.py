@@ -99,6 +99,76 @@ def test_auto_headroom_keeps_the_curve_at_or_below_unity() -> None:
     assert response.max() <= 1.02  # 只留窗函數造成的極小漣波
 
 
+def _response_db(kernel: np.ndarray, rate: int, hz: float) -> float:
+    spectrum = np.fft.rfft(kernel, 1 << 18)
+    freqs = np.fft.rfftfreq(1 << 18, 1.0 / rate)
+    return float(20.0 * np.log10(np.abs(spectrum[np.argmin(np.abs(freqs - hz))])))
+
+
+@pytest.mark.parametrize("rate", [48000, 96000, 192000])
+@pytest.mark.parametrize("band", [0, 1, 2])
+def test_low_bands_reach_their_setting_at_any_rate(rate: int, band: int) -> None:
+    """拉到 +12 dB 的低頻段，實際就要是 +12 dB（相對於不動的 1 kHz）。
+
+    修正前 48k 下 31／62／125 Hz 只得到 +7.9／+5.4／+8.2 dB：設計格點與核心
+    一樣長（0、47、94 Hz…），62 Hz 根本不在格點上，加窗又把剩下的起伏抹掉
+    一截。而抽頭數固定成樣本數，192k 下 62 Hz 那段 +12 dB 只剩 +0.0 dB。
+    """
+    gains = _flat()
+    gains[band] = EQ_GAIN_LIMIT_DB
+    kernel = design_kernel(gains, rate)
+    boost = _response_db(kernel, rate, EQ_BAND_HZ[band]) - _response_db(kernel, rate, 1000.0)
+    assert boost == pytest.approx(EQ_GAIN_LIMIT_DB, abs=1.0)
+
+
+@pytest.mark.parametrize(
+    "curve",
+    [[9, 6, 3, 0, 0, 0, 0, 0, 0, 0], [6, 4, 2, 0, -2, -2, 0, 2, 4, 6], [4, 6, 4, 0, -1, 0, 2, 4, 4, 2]],
+    ids=["bass-shelf", "v-shape", "loudness"],
+)
+def test_everyday_curves_land_on_every_band_centre(curve: list[float]) -> None:
+    """實務上的曲線每個頻段中心都要到位，不只是被拉最多的那一段。
+
+    修正前低音棚架差 1.3 dB、V 形差 0.9 dB，而且誤差全集中在最低的幾段。
+
+    形狀與 preamp 分開斷言：低頻棚架從 DC 一路平到 31 Hz 再往下掉，在這個
+    解析度下平滑的曲線頂端一定略高於 31 Hz 的值，保證「處處 ≤ 0 dB」的正規化
+    因此會多壓一點點。那只會讓整體略小聲，不會改變形狀，也不會削波。
+    """
+    kernel = design_kernel(curve, RATE)
+    desired = np.asarray(curve, dtype=np.float64) - max(0.0, max(curve))
+    realized = np.array([_response_db(kernel, RATE, hz) for hz in EQ_BAND_HZ])
+    offset = float(np.median(realized - desired))
+    assert np.abs(realized - desired - offset).max() < 0.3
+    assert -1.5 < offset <= 0.05
+
+
+@pytest.mark.parametrize("rate", [44100, 96000, 192000])
+def test_latency_in_milliseconds_does_not_depend_on_the_rate(rate: int) -> None:
+    """抽頭數跟著取樣率換算，延遲的**秒數**因此不變（約 10.6 ms）。"""
+    eq = GraphicEqualizer()
+    eq.prepare(rate, CHANNELS, rate * 60 // 1000)
+    gains = _flat()
+    gains[5] = 6.0
+    eq.set_gains(gains)
+    assert eq.latency_frames / rate == pytest.approx(511 / 48000, rel=0.01)
+
+
+def test_turning_back_on_does_not_replay_old_audio() -> None:
+    """全平時 EQ 不運算，尾巴停在上次開著時的狀態 —— 重新打開要先清掉。"""
+    eq = GraphicEqualizer()
+    eq.prepare(RATE, CHANNELS, BLOCK)
+    gains = _flat()
+    gains[5] = 12.0
+    eq.set_gains(gains)
+    _run(eq, _program(BLOCK))
+
+    eq.set_gains(_flat())
+    eq.set_gains(gains)
+    silence = np.zeros(BLOCK * CHANNELS, dtype=np.float32)
+    assert np.abs(_run(eq, silence)).max() == 0.0
+
+
 # ------------------------------------------------------------------ 等化器行為
 
 
@@ -270,6 +340,43 @@ def test_limiter_catches_a_peak_before_it_arrives() -> None:
     output = _run(limiter, signal)
     assert np.abs(output).max() <= LIMITER_CEILING + 1e-4
     assert limiter.engaged_frames > 0
+
+
+def _limiter_gain(block: int) -> np.ndarray:
+    """60 Hz 的大正弦加一個尖峰，回傳限幅器實際施加的逐樣本增益。"""
+    limiter = Limiter()
+    limiter.prepare(RATE, CHANNELS, BLOCK)
+    t = np.arange(8192) / RATE
+    mono = 0.9 * np.sin(2 * np.pi * 60.0 * t)
+    mono[3000] = 1.2
+    signal = np.stack([mono, mono], axis=1).astype(np.float32).reshape(-1)
+    output = _run(limiter, signal, block=block).reshape(-1, CHANNELS)[:, 0]
+    delayed = np.concatenate([np.zeros(limiter.latency_frames), mono])[: mono.size]
+    usable = np.abs(delayed) > 1e-2
+    return np.divide(output, delayed, out=np.ones_like(delayed), where=usable)[usable]
+
+
+def test_limiter_ramps_down_instead_of_stepping() -> None:
+    """增益要在前瞻視窗內用斜坡降下來，不可以一個樣本就跳到位。
+
+    修正前只取滑動最小值，增益在峰值前 64 框的**一個樣本內**從 1.000 跳到
+    0.787 —— 乘在 60 Hz 大正弦上就是一聲喀。斜坡長度是 lookahead + 1 框，
+    所以每個樣本最多只能降 (1 − 0.787) / 65 ≈ 0.0033。
+    """
+    gain = _limiter_gain(BLOCK)
+    assert gain.min() < 0.8, "尖峰沒有被壓下來，這條測試量不到東西"
+    assert np.abs(np.diff(gain)).max() < 0.01
+
+
+def test_limiter_ramp_does_not_depend_on_block_size() -> None:
+    """斜坡與回復都要跨回呼接續，切塊方式不該改變結果。
+
+    這條順帶抓到一個既有的錯：回復速率的累積最小值把 ``[1:]`` 切在
+    accumulate **之前**，上一個回呼的增益根本沒參與 —— 每個回呼的開頭增益
+    都直接跳回目標值。峰值被壓過之後，40 dB/s 的回復只在單一回呼內成立，
+    跨過回呼邊界（每 60 ms）就是一次增益階梯。
+    """
+    assert np.allclose(_limiter_gain(137), _limiter_gain(BLOCK), atol=1e-9)
 
 
 def test_limiter_declared_latency_matches_measured() -> None:

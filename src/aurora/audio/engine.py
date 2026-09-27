@@ -58,6 +58,8 @@ class AudioEngine:
         self._duration = 0.0
 
         self._frames_played = 0
+        #: 曲尾沖刷多送、實際上不屬於這首歌的靜音框數（見 _flush_tail）。
+        self._tail_overshoot = 0
         self._playing = False
         self._finished = False
 
@@ -86,10 +88,10 @@ class AudioEngine:
     def processing_latency_frames(self) -> int:
         """DSP 級聯引入的演算法延遲（框）。空 graph 時是 0。
 
-        目前**沒有**被 :attr:`position` 補償 —— 現在還沒有任何處理器，
-        延遲恆為 0，補償寫了也沒有東西可驗證。這個屬性先存在，是為了讓
-        歌詞對齊與未來的 A/V 同步有個一等公民的來源可用，而不是等到那時候
-        再從各處拼湊。真正接上時要連同 position 的定義一起改。
+        :attr:`position` 已經扣掉它。以前這裡寫「還沒有任何處理器，延遲恆為 0，
+        真正接上時要連同 position 一起改」—— EQ、Spatial、限幅器接上之後延遲
+        最多約 55 ms（48k 下 2048 + 511 + 64 框），那一步卻沒有跟著做，歌詞與
+        進度條就一直比耳朵聽到的早那麼多。
         """
         return self.graph.latency_frames
 
@@ -113,8 +115,17 @@ class AudioEngine:
 
     @property
     def position(self) -> float:
-        """播放位置（秒）。由實際送出的樣本數推算，不是牆鐘時間。"""
-        return self._frames_played / self._sample_rate if self._sample_rate else 0.0
+        """**聽得到的**播放位置（秒）。由送進 DSP 的樣本數推算，不是牆鐘時間。
+
+        送進 DSP 的樣本要再過 :attr:`processing_latency_frames` 才會出來，所以
+        扣掉它才是此刻耳朵聽到的位置；歌詞對齊、續播位置與換取樣率時的接續點
+        都以它為準。裝置緩衝（約 60 ms）不在這裡 —— 那一段開不開音效都一樣，
+        而且 miniaudio 不回報實際值。
+        """
+        if not self._sample_rate:
+            return 0.0
+        heard = self._frames_played - self.graph.latency_frames - self._tail_overshoot
+        return max(0, heard) / self._sample_rate
 
     @property
     def is_playing(self) -> bool:
@@ -232,15 +243,48 @@ class AudioEngine:
             self._callback = None
             return False
 
+        tail = self._flush_tail(source)
+        next(tail)  # 與 stream_file 一樣先啟動，stream_with_callbacks 會直接 send
         callback = miniaudio.stream_with_callbacks(
-            source,
+            tail,
             frame_process_method=self._process,
             end_callback=self._on_end,
         )
         next(callback)  # miniaudio 要求傳入前先啟動產生器
         self._callback = callback
         self._frames_played = max(0, seek_frame)
+        self._tail_overshoot = 0
         return True
+
+    def _flush_tail(
+        self, source: Generator[array.array[float], int, None]
+    ) -> Generator[array.array[float], int, None]:
+        """解碼器耗盡之後，再送出 DSP 延遲那麼多框的靜音。
+
+        DSP 級聯裡隨時壓著最後 ``latency_frames`` 框（Spatial 的輸出佇列、
+        EQ 與反射的尾巴、限幅器的前瞻）。解碼器一結束就宣告播完的話，這一段
+        永遠出不來 —— 開著音效時每首歌的最後約 55 ms 都被切掉，換下一首時
+        ``graph.reset()`` 再把它丟掉。補靜音把它沖出來；空 graph 時延遲是 0，
+        一個樣本都不多送，與以前逐位元相同。
+
+        每一塊都給足呼叫端要的框數，最後一塊因此會多出一點靜音（不到一個
+        回呼）。刻意不給「剛好」的短塊：``tools/bench_callback.py`` 以最小的
+        回呼算 deadline，一個短塊就會讓整份報告的百分比虛胖（實測 60 → 54.7 ms）。
+        多出來的量記在 ``_tail_overshoot``，:attr:`position` 會扣掉它。
+        """
+        frames = yield array.array("f")
+        while True:
+            try:
+                chunk = source.send(frames)
+            except StopIteration:
+                break
+            frames = yield chunk
+        remaining = self.graph.latency_frames
+        while remaining > 0:
+            count = max(1, frames or FRAMES_PER_CHUNK)
+            self._tail_overshoot = max(0, count - remaining)
+            remaining -= count
+            frames = yield array.array("f", bytes(count * self._channels * 4))
 
     # ------------------------------------------------------------ 傳輸控制
 
@@ -285,6 +329,7 @@ class AudioEngine:
         with self._lock:
             self._teardown_device()
             self._frames_played = 0
+            self._tail_overshoot = 0
 
     def seek(self, seconds: float) -> bool:
         """跳到指定秒數。以新的起點重建解碼器，在鎖內抽換。"""

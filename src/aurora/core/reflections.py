@@ -32,7 +32,26 @@ D/R 控制（``core/spatial.py`` 的 depth）已經能把直達聲往後推，�
 
 **立體聲（``binaural`` 關閉）**：左聲道的反射主要送到**右**聲道，反之亦然。
 這模擬側牆反射的路徑（聲音打到右牆再回到左耳），也是「空間變寬」的來源。
-同相直接疊回原聲道只會變成梳狀濾波，聽起來像相位問題而不是空間。
+
+交叉餵送只決定**偏在一側**的內容反射落在哪裡。置中的內容（人聲、貝斯、
+大鼓 —— 能量的大宗）左右相同，交叉之後兩聲道的反射仍然一模一樣，所以
+每個聲道都是「原聲 + 11/23 ms 的延遲副本」：全開時 −4.1～+2.8 dB、每 91 Hz
+一個凹陷的梳狀濾波，而且兩耳聽到的是同一把梳子。以前這裡寫「交叉餵送避免
+了梳狀濾波」，對置中內容並不成立。
+
+這在立體聲路徑上是**固有的**，不是參數沒調好：
+
+* 把兩面牆的反射分別偏到兩側（牆面定位），在等響度下只能把兩耳功率和的
+  起伏從 −4.1 改善到 −3.8 dB（12 dB 定位也只有 −3.4 dB），因為能量只是從
+  一個聲道搬到另一個聲道。
+* 真正能消掉它的做法是左右互補極性（``L += r``、``R −= r``：兩耳功率和完全
+  平坦、折單聲道完全抵消），但那讓反射變成強烈反相 —— §9.10 量過，反相
+  的反射聽起來是「在頭裡面」，正好是這一級要做的事的反面
+  （``tests/test_reflections.py`` 的耳間相關性測試守著這條）。
+* 讓置中內容的反射來自**不同方向**才是正解，那就是下面的雙耳 renderer。
+
+所以這一級的強度（:data:`REFLECTION_LEVEL` × 乾濕比）就是梳子的深度；
+要不要為了更淡的染色而降低它，是聽感上的取捨，不是 bug。
 
 **雙耳（``binaural`` 開啟）**：交叉餵送是「沒有 HRTF 可用時對側牆路徑的
 近似」。有 HRTF 之後就不必近似了——兩個抽頭改成兩面**虛擬牆**（左牆、
@@ -56,6 +75,14 @@ D/R 控制（``core/spatial.py`` 的 depth）已經能把直達聲往後推，�
 
 濾波器與帶通在 :meth:`prepare` 就先合成成一條核心（頻域相乘一次），
 回呼上看到的只是一條 :data:`REFLECTION_HRTF_TAPS` 抽頭的 FIR。
+
+## 核心長度跟著取樣率走
+
+帶通與雙耳核心的抽頭數都是在 48 kHz 下量出來的（見各常數的註解），
+代表的是**時間長度**。固定樣本數的話 96k 下 257 抽頭只剩一半的頻率解析度，
+300 Hz 的高通在 100 Hz 只抑制到約 0.3（48k 下是 0.06）—— 低頻反射又回來了。
+所以長度一律經 ``core/rates.py`` 換算；卷積改用 FFT overlap-save，長度加倍
+時成本只多一點點，而不是直接卷積的四倍。
 """
 
 from __future__ import annotations
@@ -79,9 +106,12 @@ from aurora.core.constants import (
     REFLECTION_TAP_MS,
 )
 from aurora.core.hrtf import load_filters, resolve_profile, synthetic_filters
+from aurora.core.rates import scaled_fft_size, scaled_taps
 
 FloatArray = npt.NDArray[np.float32]
-Kernels = tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]
+Spectrum = npt.NDArray[np.complex128]
+#: 雙耳路徑的兩條核心（和／差），存的是 overlap-save 用的頻譜。
+Kernels = tuple[Spectrum, Spectrum]
 
 #: 避免除以零。
 _EPS = 1e-12
@@ -125,6 +155,9 @@ class EarlyReflections:
         self._line: npt.NDArray[np.float64] | None = None
         self._write = 0
         self._kernel: npt.NDArray[np.float64] = np.zeros(0)
+        self._kernel_spectrum: Spectrum = np.zeros(0, dtype=np.complex128)
+        self._hrtf_taps = REFLECTION_HRTF_TAPS
+        self._nfft = 0
         self._tail: npt.NDArray[np.float64] | None = None
         self._capacity = 0
 
@@ -150,7 +183,13 @@ class EarlyReflections:
 
     @amount.setter
     def amount(self, value: float) -> None:
-        self._amount = float(np.clip(value, 0.0, 1.0))
+        amount = float(np.clip(value, 0.0, 1.0))
+        # 關著的時候延遲線不會前進，裡面留的是上次開著時的音訊 —— 從關到開
+        # 不清的話，前 23 ms 的反射會是不知道多久以前的內容。**先清、再改
+        # amount**：amount 還是 0 時回呼一碰到 process 就返回，不會同時動到它。
+        if amount > 1e-6 and not self.active:
+            self.reset()
+        self._amount = amount
 
     @property
     def level(self) -> float:
@@ -223,13 +262,17 @@ class EarlyReflections:
         capacity = max(self._delays) + self._capacity + 1
         self._line = np.zeros((capacity, channels), dtype=np.float64)
         self._write = 0
-        self._kernel = _bandpass_kernel(
-            REFLECTION_KERNEL_TAPS, sample_rate, REFLECTION_HP_HZ, REFLECTION_LP_HZ
-        )
-        self._tail = np.zeros((REFLECTION_KERNEL_TAPS - 1, channels), dtype=np.float64)
-        self._binaural_tail = np.zeros((REFLECTION_HRTF_TAPS - 1, channels), dtype=np.float64)
+        band_taps = scaled_taps(REFLECTION_KERNEL_TAPS, sample_rate)
+        self._hrtf_taps = scaled_taps(REFLECTION_HRTF_TAPS, sample_rate)
+        self._kernel = _bandpass_kernel(band_taps, sample_rate, REFLECTION_HP_HZ, REFLECTION_LP_HZ)
+        self._tail = np.zeros((band_taps - 1, channels), dtype=np.float64)
+        self._binaural_tail = np.zeros((self._hrtf_taps - 1, channels), dtype=np.float64)
 
-        longest = max(REFLECTION_KERNEL_TAPS, REFLECTION_HRTF_TAPS) - 1
+        longest = max(band_taps, self._hrtf_taps) - 1
+        # overlap-save 的 FFT 長度只要 ≥ 區塊 + 核心 − 1，有效段就不會被環形
+        # 摺疊污染。取 2 的冪次讓 FFT 快。
+        self._nfft = 1 << (self._capacity + longest).bit_length()
+        self._kernel_spectrum = np.fft.rfft(self._kernel, self._nfft)
         self._summed = np.zeros((self._capacity, channels))
         self._feed = np.zeros((self._capacity, channels))
         self._pad = np.zeros((longest + self._capacity, channels))
@@ -249,7 +292,7 @@ class EarlyReflections:
             self._hrtf_measured = False
             return
 
-        size = REFLECTION_HRTF_FFT_SIZE
+        size = scaled_fft_size(REFLECTION_HRTF_FFT_SIZE, self._sample_rate)
         path = resolve_profile(self._hrtf_profile)
         measured = load_filters(self._sample_rate, size, path) if path is not None else None
         self._hrtf_measured = measured is not None
@@ -266,7 +309,7 @@ class EarlyReflections:
         # 反射這裡沒有那條恆等式。直接拿來用會讓每面牆各少 6 dB。
         _, _, _, ipsi, contra = filters.ear_responses()
         band = np.fft.rfft(self._kernel, n=size)
-        taps = REFLECTION_HRTF_TAPS
+        taps = self._hrtf_taps
         kernel_sum = np.asarray(np.fft.irfft((ipsi + contra) * band, n=size)[:taps])
         kernel_diff = np.asarray(np.fft.irfft((ipsi - contra) * band, n=size)[:taps])
 
@@ -290,7 +333,10 @@ class EarlyReflections:
         scale = 2.0 * float(np.sqrt(np.sum(np.square(self._kernel)))) / max(
             math.sqrt(energy), _EPS
         )
-        self._binaural_kernels = (kernel_sum * scale, kernel_diff * scale)
+        self._binaural_kernels = (
+            np.fft.rfft(kernel_sum * scale, self._nfft),
+            np.fft.rfft(kernel_diff * scale, self._nfft),
+        )
 
     def reset(self) -> None:
         """換歌或 seek 時清掉延遲線，否則會聽到上一段的殘留反射。"""
@@ -378,7 +424,7 @@ class EarlyReflections:
     ) -> None:
         """帶通之後直接疊回去。低頻反射只會糊，高頻損失則是距離線索。"""
         assert self._tail is not None
-        filtered = self._convolve(summed, self._kernel, self._tail)
+        filtered = self._convolve(summed, self._kernel_spectrum, self._tail)
         # 直達聲完全沒被動過 —— 這是延遲為 0 的原因。
         view += (filtered * (self._level * self._amount)).astype(np.float32)
 
@@ -414,22 +460,24 @@ class EarlyReflections:
     def _convolve(
         self,
         signal: npt.NDArray[np.float64],
-        kernel: npt.NDArray[np.float64] | Kernels,
+        kernel: Spectrum | Kernels,
         tail: npt.NDArray[np.float64],
     ) -> npt.NDArray[np.float64]:
-        """逐聲道 overlap-save 卷積，結果就地寫回 ``signal``。
+        """逐聲道 overlap-save 卷積（FFT），結果就地寫回 ``signal``。
 
-        ``kernel`` 給單一陣列時兩個聲道共用，給 tuple 時逐聲道各一條。
-        pad buffer 在 prepare 配好，所以這裡不再 ``np.concatenate``——
-        那是每個回呼一次的可避免配置（dsp_graph 契約規則 2）。
+        ``kernel`` 是核心在 ``self._nfft`` 點上的頻譜：給單一陣列時兩個聲道
+        共用，給 tuple 時逐聲道各一條。``tail`` 存的是上一塊最後
+        ``核心長度 − 1`` 個輸入樣本。pad buffer 在 prepare 配好，所以這裡不再
+        ``np.concatenate`` —— 那是每個回呼一次的可避免配置（dsp_graph 契約規則 2）。
         """
         frames = signal.shape[0]
+        overlap = tail.shape[0]
         for channel in range(signal.shape[1]):
-            current = kernel[channel] if isinstance(kernel, tuple) else kernel
-            overlap = current.size - 1
+            spectrum = kernel[channel] if isinstance(kernel, tuple) else kernel
             pad = self._pad[: overlap + frames, channel]
-            pad[:overlap] = tail[:overlap, channel]
+            pad[:overlap] = tail[:, channel]
             pad[overlap:] = signal[:, channel]
-            signal[:, channel] = np.convolve(pad, current, mode="valid")[:frames]
-            tail[:overlap, channel] = pad[-overlap:]
+            full = np.fft.irfft(np.fft.rfft(pad, self._nfft) * spectrum, self._nfft)
+            signal[:, channel] = full[overlap : overlap + frames]
+            tail[:, channel] = pad[frames:]
         return signal

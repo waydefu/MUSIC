@@ -320,3 +320,60 @@ def test_meter_reset_clears_accumulated_state() -> None:
     meter.feed(np.ones(50, dtype=np.float32))
     meter.reset()
     assert meter.stats().clipped_runs == 0
+
+
+def _interleave(left: np.ndarray, right: np.ndarray) -> npt.NDArray[np.float32]:
+    return np.stack([left, right], axis=1).astype(np.float32).reshape(-1)
+
+
+def test_clipping_on_one_channel_is_not_hidden_by_the_downmix() -> None:
+    """左聲道撞頂、右聲道安靜，一樣是削波。
+
+    以前電表吃的是單聲道混音 ``(L+R)/2``：這種情況下混音只有 0.5，回報
+    0 次削波、峰值 −6 dBFS。削波與峰值是每個聲道的性質。
+    """
+    left = np.zeros(4800)
+    left[1000:1100] = 1.0
+    meter = LevelMeter()
+    meter.feed(_interleave(left, np.zeros_like(left)), channels=2)
+    stats = meter.stats()
+    assert stats.clipped_runs == 1
+    assert stats.peak_db == pytest.approx(0.0, abs=1e-6)
+
+
+def test_anti_phase_clipping_is_not_cancelled_by_the_downmix() -> None:
+    """左右反相同時撞頂時，混音是 0 —— 以前電表完全看不到。"""
+    left = np.zeros(4800)
+    left[2000:2050] = 1.0
+    meter = LevelMeter()
+    meter.feed(_interleave(left, -left), channels=2)
+    assert meter.stats().clipped_runs == 1
+
+
+def test_simultaneous_clipping_on_both_channels_counts_once() -> None:
+    """事件是以「框」計的：左右同時撞頂是一處削波，不是兩處。"""
+    both = np.zeros(4800)
+    both[100:200] = 1.0
+    meter = LevelMeter()
+    meter.feed(_interleave(both, both), channels=2)
+    assert meter.stats().clipped_runs == 1
+
+
+def test_vectorised_clip_counting_matches_the_definition() -> None:
+    """向量化的連段計數要與逐樣本的定義逐一相符，不論怎麼切塊。"""
+    from aurora.core.constants import CLIP_RUN_LENGTH
+
+    rng = np.random.default_rng(5)
+    hot = rng.random(20000) < 0.35  # 大量長短不一的連段
+    samples = np.where(hot, 1.0, 0.0).astype(np.float32)
+
+    expected, run = 0, 0
+    for value in hot:
+        run = run + 1 if value else 0
+        expected += int(run == CLIP_RUN_LENGTH)
+
+    for block in (1, 2, 3, 7, 64, 20000):
+        meter = LevelMeter()
+        for start in range(0, samples.size, block):
+            meter.feed(samples[start : start + block])
+        assert meter.stats().clipped_runs == expected, f"block={block}"
