@@ -85,7 +85,10 @@ def _ear_delay_samples(filters: object) -> int:
     """
     near = np.fft.irfft((filters.front_sum + filters.front_diff) / 2.0, n=FFT)
     far = np.fft.irfft((filters.front_sum - filters.front_diff) / 2.0, n=FFT)
-    return int(np.argmax(np.abs(far))) - int(np.argmax(np.abs(near)))
+    # 濾波器是環形的：置中路徑被對齊到零點之後，比它早到的近耳落在負時間
+    # （緩衝區尾端），與合成模型的慣例一樣。所以差值要以環形距離計。
+    lag = int(np.argmax(np.abs(far))) - int(np.argmax(np.abs(near)))
+    return (lag + FFT // 2) % FFT - FFT // 2
 
 
 # ------------------------------------------------------------------ 匯入工具
@@ -201,6 +204,63 @@ def test_overlong_impulse_responses_are_rejected(tmp_path: Path) -> None:
         contra=np.zeros((3, taps)),
     )
     assert load_filters(RATE, FFT, path) is None
+
+
+def _decaying_responses(path: Path, rate: int, taps: int) -> Path:
+    """每個方位角都放同一條衰減中的隨機脈衝響應 —— 只用來測長度檢查。"""
+    rng = np.random.default_rng(31)
+    response = np.exp(-np.arange(taps) / (taps / 8.0)) * rng.standard_normal(taps)
+    np.savez(
+        path,
+        sample_rate=np.int32(rate),
+        azimuths=np.asarray([0.0, 30.0, 110.0]),
+        ipsi=np.asarray([response] * 3),
+        contra=np.asarray([response] * 3),
+    )
+    return path
+
+
+def test_length_limit_applies_after_resampling(tmp_path: Path) -> None:
+    """上限是 STFT 視窗的比例，而視窗是以**引擎**取樣率計的。
+
+    以前拿原始長度比：44.1 kHz 的 512 抽頭到了 48 kHz 是 557 抽頭，
+    超過上限 512 卻照收。反過來，96 kHz 的長響應降到 48 kHz 之後其實夠短，
+    卻會被誤拒。
+    """
+    limit = int(FFT * 0.25)
+    upsampled = _decaying_responses(tmp_path / "up.npz", 44100, limit)
+    assert load_filters(RATE, FFT, upsampled) is None
+
+    downsampled = _decaying_responses(tmp_path / "down.npz", 96000, int(limit * 1.8))
+    assert load_filters(RATE, FFT, downsampled) is not None
+
+
+def test_centre_path_is_aligned_with_the_dry_signal(tmp_path: Path) -> None:
+    """置中路徑的延遲必須是 0，否則乾濕交叉淡入就是梳狀濾波。
+
+    匯入工具切掉共模延遲之後，置中 HRIR 仍比最早到的近耳晚約半個 ITD
+    加護欄。以 110° 近耳領先 16 個取樣、護欄 8 個取樣來說，置中落在第 24 個
+    取樣（0.5 ms）—— 實測 amount=0.5 時置中內容有 −9.4～+2.7 dB 的起伏。
+    """
+
+    def spike(position: int) -> np.ndarray:
+        response = np.zeros(TAPS)
+        response[position] = 1.0
+        return response
+
+    path = tmp_path / "late_centre.npz"
+    np.savez(
+        path,
+        sample_rate=np.int32(RATE),
+        azimuths=np.asarray([0.0, 30.0, 110.0]),
+        ipsi=np.asarray([spike(24), spike(18), spike(8)]),
+        contra=np.asarray([spike(24), spike(30), spike(40)]),
+    )
+    filters = load_filters(RATE, FFT, path)
+    assert filters is not None
+    assert int(np.argmax(np.abs(np.fft.irfft(filters.centre, n=FFT)))) == 0
+    # 方向線索（兩耳之間的相對時序）不可以被對齊動到。
+    assert _ear_delay_samples(filters) == 12
 
 
 def test_azimuth_too_far_from_target_is_rejected(tmp_path: Path) -> None:

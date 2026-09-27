@@ -157,6 +157,93 @@ def test_seek_produces_different_audio_than_start(flac_path: Path) -> None:
 # ------------------------------------------------------------------ 播畢
 
 
+class _Delay:
+    """把訊號延遲固定框數的處理器 —— 模擬任何有延遲的 DSP 級。"""
+
+    def __init__(self, frames: int) -> None:
+        self._frames = frames
+        self._line = np.zeros(0, dtype=np.float32)
+
+    def prepare(self, sample_rate: int, channels: int, max_frames: int) -> None:
+        self._line = np.zeros(self._frames * channels, dtype=np.float32)
+
+    def process(self, buf: np.ndarray) -> None:
+        joined = np.concatenate([self._line, buf])
+        buf[:] = joined[: buf.size]
+        self._line = joined[buf.size :]
+
+    def reset(self) -> None:
+        self._line[:] = 0.0
+
+    @property
+    def latency_frames(self) -> int:
+        return self._frames
+
+
+def test_position_is_what_you_hear_not_what_was_decoded(flac_path: Path) -> None:
+    """位置要扣掉 DSP 延遲。
+
+    送進 DSP 的樣本要再過 ``latency_frames`` 才會出來；以前 position 沒扣，
+    開著音效時歌詞與進度條就比耳朵聽到的早約 55 ms。
+    """
+    engine = AudioEngine(RATE)
+    try:
+        engine.graph.set_stages((_Delay(4410),))
+        assert engine.load(str(flac_path))
+        total = sum(engine.pump(1024) for _ in range(40))
+        assert engine.position == pytest.approx((total - 4410) / RATE, abs=1e-6)
+    finally:
+        engine.close()
+
+
+def test_dsp_tail_is_played_out_at_end_of_stream(flac_path: Path) -> None:
+    """解碼器結束時，DSP 裡壓著的最後那一段也要送出去。
+
+    以前解碼器一耗盡就宣告播完，開著音效時每首歌最後約 55 ms 永遠出不來。
+    這裡用 100 ms 的延遲級：沖出來的樣本數至少要多出那 100 ms（最後一塊
+    給足呼叫端要的框數，所以最多再多不到一塊），位置最後要剛好走到整首的
+    長度，而且每一塊都是呼叫端要的大小 —— 短塊會讓 ``bench_callback.py``
+    的 deadline 算錯。
+    """
+    def pumped(engine: AudioEngine) -> list[int]:
+        sizes = []
+        for _ in range(5000):
+            got = engine.pump(1024)
+            if got == 0:
+                break
+            sizes.append(got)
+        return sizes
+
+    plain = AudioEngine(RATE)
+    delayed = AudioEngine(RATE)
+    try:
+        assert plain.load(str(flac_path))
+        baseline = pumped(plain)
+
+        delayed.graph.set_stages((_Delay(4410),))
+        assert delayed.load(str(flac_path))
+        flushed = pumped(delayed)
+        extra = sum(flushed) - sum(baseline)
+        assert 4410 <= extra < 4410 + 1024
+        # 沖刷不可以多出任何短塊（解碼器自己的最後一塊本來就可能是短的）。
+        assert sum(size != 1024 for size in flushed) == sum(size != 1024 for size in baseline)
+        assert delayed.position == pytest.approx(sum(baseline) / RATE, abs=1e-6)
+        assert delayed.take_finished()
+    finally:
+        plain.close()
+        delayed.close()
+
+
+def test_analyzer_sees_clipping_on_a_single_channel() -> None:
+    """來源電表要吃各聲道的原始樣本，不能只吃單聲道混音。"""
+    analyzer = Analyzer(RATE, 2)
+    left = np.zeros(4410, dtype=np.float32)
+    left[100:200] = 1.0
+    analyzer.push_interleaved(np.stack([left, np.zeros_like(left)], axis=1).reshape(-1))
+    analyzer.tick(1 / 60)
+    assert analyzer.levels().clipped_runs == 1
+
+
 def test_finished_flag_is_raised_at_end_of_stream(flac_path: Path) -> None:
     engine = AudioEngine(RATE)
     try:

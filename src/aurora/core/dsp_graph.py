@@ -89,6 +89,10 @@ class DspGraph:
         self._reason: str | None = None
         self._pending_reason: str | None = None
         self._config: tuple[int, int, int] | None = None
+        # 每一級最後一次是用哪組參數 prepare 的。以 id 為鍵並同時留住物件本身，
+        # 避免處理器被回收後 id 被別的物件重用而誤判成「已經 prepare 過」。
+        # 不用 WeakKeyDictionary：dataclass 之類的處理器可能不可雜湊。
+        self._prepared: dict[int, tuple[AudioProcessor, tuple[int, int, int]]] = {}
 
     # ------------------------------------------------------------ 狀態
 
@@ -143,18 +147,44 @@ class DspGraph:
 
         新的處理器會立刻套用目前的 ``prepare`` 參數，這樣回呼拿到的一定是
         已經配置好的東西。整條 tuple 一次換掉，回呼不會看到中間狀態。
+
+        **已經在跑的級絕對不再 prepare。** 以前這裡對每一級都無條件
+        prepare，而 UI 每移動一格滑桿就會換一次 tuple（內容其實沒變）——
+        結果每一格都把 Spatial 的輸出佇列清空、重新預填一個視窗的靜音，
+        實測每次 2121 樣本（44 ms）的斷音。更糟的是 prepare 在主執行緒上
+        重新配置 buffer，而回呼可能正走到一半，兩邊讀到不一致的長度就會拋
+        broadcast 例外，整條 graph 永久降級。
+
+        所以規則是：
+
+        * 參數跟上次不同（或從沒 prepare 過）→ prepare。
+        * 參數相同、但上一版 tuple 裡沒有它（被拿掉後又加回來）→ 只 reset，
+          清掉它離開期間殘留的舊音訊。它不在回呼正在走的 tuple 裡，所以安全。
+        * 參數相同、而且一直在 tuple 裡 → 什麼都不做。
         """
         if self._config is not None:
-            sample_rate, channels, max_frames = self._config
+            live = {id(stage) for stage in self._stages}
             for stage in stages:
-                stage.prepare(sample_rate, channels, max_frames)
+                record = self._prepared.get(id(stage))
+                if record is None or record[0] is not stage or record[1] != self._config:
+                    self._prepare_stage(stage, self._config)
+                elif id(stage) not in live:
+                    stage.reset()
         self._stages = tuple(stages)
 
     def prepare(self, sample_rate: int, channels: int, max_frames: int) -> None:
-        """設定格式並讓每一級預先配置。裝置換取樣率時會再呼叫。"""
+        """設定格式並讓每一級預先配置。裝置換取樣率時會再呼叫。
+
+        呼叫端要保證這時回呼沒有在跑（引擎在換取樣率前會先拆掉裝置）——
+        prepare 會重新配置工作 buffer，不能與 ``process`` 同時發生。
+        """
         self._config = (sample_rate, channels, max_frames)
         for stage in self._stages:
-            stage.prepare(sample_rate, channels, max_frames)
+            self._prepare_stage(stage, self._config)
+
+    def _prepare_stage(self, stage: AudioProcessor, config: tuple[int, int, int]) -> None:
+        stage.prepare(*config)
+        self._prepared[id(stage)] = (stage, config)
 
     def reset(self) -> None:
         """換歌／seek 時清掉各級的位置相關狀態。

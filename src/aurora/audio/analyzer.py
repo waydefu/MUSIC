@@ -100,6 +100,10 @@ class Analyzer:
         self._channels = channels
         self._ring = RingBuffer(int(sample_rate * _BUFFER_SECONDS))
         self._cursor = 0
+        # 電表另外吃一份交錯的原始樣本：削波與峰值是每個聲道各自的性質，
+        # 單聲道混音會把單邊撞頂藏起來（見 LevelMeter 的 docstring）。
+        self._level_ring = RingBuffer(int(sample_rate * _BUFFER_SECONDS) * channels)
+        self._level_cursor = 0
 
         self._spectrum = SpectrumProcessor(sample_rate)
         self._rolloff = RolloffAnalyzer(sample_rate)
@@ -117,6 +121,7 @@ class Analyzer:
     def push_interleaved(self, samples: FloatArray) -> None:
         """由音訊回呼呼叫。只混單聲道與寫緩衝，不做 FFT。"""
         self._ring.write(mix_to_mono(samples, self._channels))
+        self._level_ring.write(samples)
 
     # ------------------------------------------------------- UI 執行緒
 
@@ -125,9 +130,11 @@ class Analyzer:
         fresh, self._cursor = self._ring.read_since(self._cursor)
         if fresh.size:
             self._rolloff.feed(fresh)
-            self._levels.feed(fresh)
             if self._onset.feed(fresh):
                 self._onset_latch = _ONSET_LATCH_SEC
+        interleaved, self._level_cursor = self._level_ring.read_since(self._level_cursor)
+        if interleaved.size:
+            self._levels.feed(interleaved, self._channels)
 
         self._onset_latch = max(0.0, self._onset_latch - dt)
         frame = self._spectrum.process(self._ring.latest(FFT_SIZE), dt)
@@ -164,6 +171,7 @@ class Analyzer:
         self._onset.reset()
         self._onset_latch = 0.0
         self._cursor = self._ring.written
+        self._level_cursor = self._level_ring.written
 
     def reconfigure(self, sample_rate: int, channels: int) -> None:
         """輸出裝置換了取樣率時重建所有分析器。

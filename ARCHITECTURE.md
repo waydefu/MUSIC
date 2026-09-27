@@ -56,6 +56,7 @@ flowchart LR
 | FFT、頻譜、onset、rolloff | Analyzer | `src/aurora/audio/analyzer.py` |
 | 封面色票、歌詞、音質報告 | ViewModels | `src/aurora/bridge/theme.py`, `lyrics.py`, `quality.py` |
 | 回呼上的處理器級聯、掛載與降級 | DSP graph | `src/aurora/core/dsp_graph.py` |
+| DSP 長度隨取樣率換算（STFT、FIR 抽頭） | DSP 共用 | `src/aurora/core/rates.py` |
 | 等化器、限幅器、輸出電表 | 純邏輯處理器 | `src/aurora/core/eq.py`, `dynamics.py` |
 | 虛擬 5.1、距離感、立體聲／HRTF renderer | Spatial | `src/aurora/core/spatial.py` |
 | 早期反射（立體聲／雙耳兩條 renderer） | Reflections | `src/aurora/core/reflections.py` |

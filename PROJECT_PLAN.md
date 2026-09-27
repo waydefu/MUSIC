@@ -1553,6 +1553,82 @@ AURORA 現在的早期反射是那個東西的簡陋版：兩個抽頭、沒有�
 * 盲測用同一支 `tools/make_reflection_test.py`，多加一臂即可。
 * 回呼成本用 `--device` 實測，不接受推理。
 
+### 9.14 演算法稽核與修正（數值 VERIFIED，聽感待驗）
+
+一次針對整條 DSP 鏈的稽核。每一條都先用無頭數值實驗重現，修正之後再把
+同一個實驗寫成回歸測試 —— **修正前紅、修正後綠**，兩邊都實際跑過。
+
+| # | 問題 | 修正前 | 修正後 | 守門測試 |
+|---|---|---|---|---|
+| 1 | 拖任何效果滑桿都斷音：`set_stages` 對每一級無條件 `prepare`，Spatial 的輸出佇列被清空重填 | 每一格 2121 樣本（44 ms）靜音；主執行緒重配 buffer 時可能與回呼競爭而拋例外、整條永久降級 | 0 | `test_audiofx.py::test_moving_a_slider_does_not_interrupt_the_audio` |
+| 2 | 環繞的隨機相位去相關器：脈衝響應鋪滿整個視窗，環形卷積繞到負時間 | 擴散瞬態前 2–40 ms 能量 −11.1 dB（輸入 −30.8），瞬態前 25 ms 就出聲 | 立體聲 −33.6 dB、雙耳 −29.0 dB | `test_spatial.py::test_diffuse_transient_has_no_pre_echo` |
+| 3 | 「coherence」其實是 similarity：偏位乾樂器被當成環境音；depth 只壓 mid | 偏左 6 dB 的乾聲源：左右相關 1.000 → 0.362；只開 depth 時 ILD 6.0 → 10.9 dB | 1.000、6.02 dB | `test_partially_panned_instrument_keeps_its_image` |
+| 4 | 同上，用 `Re(L·R*)`：時間差立體聲隨頻率在 ±1 間擺 | 左聲道頻響起伏 16.9 dB | 0.1 dB | `test_time_difference_stereo_is_not_comb_filtered` |
+| 5 | 「以功率相加」只在平均成立：`S + g·D·S` 是乘上 `1 + g·D` | 有音高的立體聲鋪底，40 個音高增益標準差 5.0 dB | 0.3 dB | `test_tonal_stereo_content_is_not_coloured` |
+| 6 | 雙耳＋實測 HRTF：置中 HRIR 比乾訊號晚約 0.5 ms，交叉淡入成梳狀 | amount 0.5 時置中內容 −9.4～+2.7 dB | 0.0 dB | `test_hrtf_data.py::test_centre_path_is_aligned_with_the_dry_signal` |
+| 7 | HRTF 長度上限在**重取樣之前**檢查 | 44.1k→48k 的 557 抽頭、48k→192k 的 2048 抽頭都照收 | 依引擎取樣率的長度檢查 | `test_length_limit_applies_after_resampling` |
+| 8 | 合成模型 110° 的 ITD 延用 90° 的值 | 656 µs | 551 µs（後半球對兩耳連線鏡射） | `test_hrtf.py::test_itd_grows_to_the_side_then_mirrors_behind` |
+| 9 | EQ：設計格點與核心同長、抽頭數固定成樣本數 | 48k 下 62 Hz +12 dB 只得到 +5.4；192k 下 +0.0 | 所有取樣率 +12.0；日常曲線形狀誤差 ≤ 0.21 dB | `test_eq.py::test_low_bands_reach_their_setting_at_any_rate` 等 |
+| 10 | 限幅器攻擊是階梯 | 一個樣本內 1.000 → 0.787 | 65 框線性斜坡 | `test_limiter_ramps_down_instead_of_stepping` |
+| 11 | 限幅器回復：`[1:]` 切在 `minimum.accumulate` 之前，上一個回呼的增益沒參與（稽核中順帶發現） | 被壓過的峰值之後，每個回呼開頭增益直接跳回目標 | 與逐樣本參考實作逐一相符 | `test_limiter_ramp_does_not_depend_on_block_size` |
+| 12 | 來源削波偵測吃單聲道混音 | 左聲道撞頂 100 樣本：0 次、峰值 −6 dBFS；反相撞頂完全看不到 | 1 次、0 dBFS | `test_dsp.py::test_clipping_on_one_channel_is_not_hidden_by_the_downmix` 等 |
+| 13 | position 沒扣 DSP 延遲；解碼結束時 DSP 裡的尾巴被丟掉 | 開音效時歌詞早約 55 ms；每首歌最後約 55 ms 被切掉 | 扣掉延遲；結尾補靜音把尾巴沖出來 | `test_engine.py::test_position_is_what_you_hear_not_what_was_decoded`、`test_dsp_tail_is_played_out_at_end_of_stream` |
+| 14 | 所有樣本數長度（STFT、EQ 與反射的 FIR、平滑係數）固定，不隨取樣率換算 | 192k 下 Spatial 平滑時間常數 131 → 33 ms、反射高通幾乎不濾 | 依 `core/rates.py` 換算成同樣的秒數 | `test_window_follows_the_sample_rate`、`test_high_sample_rates_keep_low_frequencies_out` |
+
+#### Spatial 換掉了什麼
+
+每一格改做 2×2 共變異矩陣的特徵分解（primary–ambient extraction）：主特徵
+向量是直達聲的方向（偏位、時間差都只是方向的一部分），次特徵值是環境音
+在每個方向上的功率。距離機制把**直達成分**的 mid 與 side 一起往後推；
+加寬只作用在**環境成分**的 side 上。硬定位不再需要 panning 閘門 ——
+R 恆為 0 時次特徵值就是 0，整格自動被認成直達聲。
+
+立體聲路徑**不再做去相關**。兩個環繞聲道折回立體聲時本來就以 ±u 疊回
+side，去相關在那裡對耳間相關性沒有任何作用（side 與自己的濾波副本相加），
+剩下的只有 #2 與 #5 兩個副作用。現在直接把環境音 side 乘上同樣的**能量
+倍率** `1 + level²`，平均效果與 §9.6 用 Atmos 測試片定下 `SPATIAL_SURROUND_LEVEL`
+的那組實測完全相同。雙耳路徑仍需要兩條互不相關的環繞饋給（§9.10），
+去相關器改成群延遲限制在 1–11 ms 的設計，脈衝響應不再鋪滿視窗。
+
+**兩個刻意的行為變化，要實機聽過才算數：**
+
+* depth 現在推的是**所有直達聲**，偏位樂器也一起往後（以前只有置中的
+  mid 被壓，而且是錯的方式）。
+* 立體聲的加寬少了隨機相位帶來的那點「瀰漫感」（42 ms 噪訊尾巴的副作用）。
+  如果實機聽起來變「乾淨但變窄」，那是那個副作用原本在充當殘響，
+  該補的是 §9.13 的房間，不是把預回音加回來。
+
+#### 早期反射的梳狀：**沒有修，需要決定**
+
+立體聲路徑上，置中內容的反射在兩聲道完全相同，每個聲道都是「原聲 +
+11/23 ms 延遲副本」：全開 −4.1～+2.8 dB、每 91 Hz 一個凹陷。以前的註解說
+交叉餵送避免了梳狀濾波，對置中內容不成立（已更正）。在立體聲路徑上它是
+**固有的**：
+
+* 牆面定位（兩面牆的反射偏到兩側）在等響度下只能把兩耳功率和的起伏從
+  −4.1 改善到 −3.8 dB。
+* 左右互補極性可以讓兩耳功率和完全平坦，但反射會強烈反相，正好違反本節
+  上面 §9.10 的結論（`test_reflections.py` 的耳間相關性測試守著）。
+
+能選的只有：接受（現況）、降低 `REFLECTION_LEVEL`（梳子變淺、空間感也變淡）、
+或用雙耳路徑。這是聽感取捨，不是 bug。
+
+#### EQ 的剩餘限制
+
+1023 抽頭 @48k 的解析度約 47 Hz，31 與 62 Hz 兩段落在同一個格子裡。頻段中心
+修正能讓被拉的那一段到位，但相鄰那段會被帶動（單拉 62 Hz +12 dB 時 31 Hz
+約 +7 dB）。低頻棚架因為 DC 到 31 Hz 之間的平滑頂端，保證「處處 ≤ 0 dB」的
+正規化會多壓約 0.8 dB —— 只會略小聲，不會削波。設計在主執行緒上每次約
+2–8 ms（依取樣率）。
+
+#### 成本（offline，非權威）
+
+Spatial 全開、48k：立體聲 mean 約 +5～11%（~1.0 → ~1.06 ms），雙耳約
++10～28%（~1.05 → ~1.24 ms），都在 60 ms 期限的 2.2% 以內。完整鏈（EQ 十段全開 +
+Spatial + 反射 + 限幅）mean 1.81 → 1.93 ms（3.0% → 3.2%）。192k 反而變快
+（mean 4.11 → 3.93 ms、p99 5.51 → 4.64 ms）——視窗跟著取樣率變長，每次回呼的
+hop 數回到與 48k 相同。權威數字仍然要 `bench_callback.py --device`。
+
 ## 10. 交接：目前狀態
 
 > 這一節原本是「Mac 開發者要開工」的清單。B1–B4 已完成（PR #11），
@@ -1619,6 +1695,7 @@ macOS 的檔案關聯靠 `Info.plist`，本階段不打包）。
 | 雙耳反射的 `--device` 成本 | ⬜ 未量。offline 配對是 +0.19 ms／+0.31 個百分點，權威數字要實機 |
 | 反射方位角 110° vs 60° | 🔶 一次盲測偏好 **60°**（較通透），但一首歌一個人一次，**不足以改預設** |
 | 雙耳模式的音場寬度 | ❌ **已知問題**。IACC 全頻 +0.78，比不處理的 +0.71 還窄；P1 折回是 +0.03。詳見 §9.12，解法見 §9.13 |
+| §9.14 的演算法修正（Spatial 直達／環境分離、EQ 頻段修正、限幅器斜坡） | ⬜ **未實機聽過**。數值與回歸測試都綠，但 depth 現在也推偏位樂器、立體聲加寬少了隨機相位的瀰漫感 —— 兩者都是刻意的行為變化，要聽過才算數 |
 | 打包版 | ✅ 2026-08-23 重驗（含 EQ／Spatial／反射**與 §9.10 的 HRTF**）：167 MB／2702 檔、凍結環境 QML 載入成功、adapter 解析為 Windows |
 
 ### 10.5 給接手者的三條教訓
@@ -1699,9 +1776,9 @@ macOS 的檔案關聯靠 `Info.plist`，本階段不打包）。
    下沉的去處應該是 `tools/` 底下的共用模組而不是 `core/`——WAV 檔案 I/O
    是工具才需要的東西，不該進到打包的產品裡。
 
-5. **`processing_latency_frames` 仍未接上 position 補償。** 這是刻意的（見
-   `engine.py` 的 docstring），但延遲已經從 0 變成 EQ 511 + Spatial 1024 框，
-   歌詞對齊的誤差是真的存在了。
+5. ~~**`processing_latency_frames` 仍未接上 position 補償。**~~
+   **已處理**（§9.14 #13）：`AudioEngine.position` 扣掉 DSP 延遲，解碼結束時補
+   靜音把 DSP 裡的尾巴沖出來。
 
 ## 11. 明確押後
 

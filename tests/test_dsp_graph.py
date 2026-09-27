@@ -210,6 +210,54 @@ def test_prepare_reaches_every_stage_including_late_arrivals() -> None:
     assert late.prepared == (RATE, 2, 4096)
 
 
+def test_republishing_the_same_stages_does_not_prepare_them_again() -> None:
+    """UI 每移動一格滑桿就會重新發佈一次內容相同的 tuple。
+
+    以前每次都會 prepare —— 而 prepare 會清掉 Spatial 的輸出佇列、重新預填
+    一個視窗的靜音，實測每格斷音 44 ms。已經在跑的級必須原封不動。
+    """
+    graph = DspGraph()
+    graph.prepare(RATE, 2, 4096)
+    stage = Gain(1.0)
+    graph.set_stages((stage,))
+    stage.prepared = None
+
+    graph.set_stages((stage,))
+    graph.set_stages((stage, Gain(1.0)))
+
+    assert stage.prepared is None
+    assert stage.resets == 0
+
+
+def test_stage_that_comes_back_is_reset_not_reprepared() -> None:
+    """被拿掉之後再加回來的級，buffer 裡是它離開前的舊音訊 —— 要清掉。"""
+    graph = DspGraph()
+    graph.prepare(RATE, 2, 4096)
+    stage = Gain(1.0)
+    graph.set_stages((stage,))
+    graph.set_stages(())
+    stage.prepared = None
+
+    graph.set_stages((stage,))
+
+    assert stage.prepared is None
+    assert stage.resets == 1
+
+
+def test_stage_that_missed_a_rate_change_is_prepared_again() -> None:
+    """不在級聯裡的時候錯過了取樣率變更，回來時必須用新參數重新配置。"""
+    graph = DspGraph()
+    graph.prepare(RATE, 2, 4096)
+    stage = Gain(1.0)
+    graph.set_stages((stage,))
+    graph.set_stages(())
+    graph.prepare(96000, 2, 8192)
+
+    graph.set_stages((stage,))
+
+    assert stage.prepared == (96000, 2, 8192)
+
+
 def test_reset_reaches_every_stage() -> None:
     graph = DspGraph()
     stage = Gain(1.0)

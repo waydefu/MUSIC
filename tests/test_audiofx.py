@@ -114,6 +114,60 @@ def test_turning_everything_off_removes_the_chain(fx: object) -> None:
     assert controller.latencyMs == 0.0
 
 
+def _longest_silent_run(samples: object) -> int:
+    import numpy as np
+
+    silent = np.abs(np.asarray(samples)) < 1e-6
+    if not silent.any():
+        return 0
+    # 連段長度：找出每段 True 的起訖。
+    edges = np.diff(np.concatenate(([0], silent.astype(np.int8), [0])))
+    return int((np.flatnonzero(edges == -1) - np.flatnonzero(edges == 1)).max())
+
+
+@pytest.mark.parametrize(
+    "move",
+    [
+        lambda c: c.setSpatialAmount(0.55),
+        lambda c: c.setBandGain(5, 1.0),
+        lambda c: c.setBinauralEnabled(True),
+    ],
+    ids=["spatial", "eq-band", "binaural"],
+)
+def test_moving_a_slider_does_not_interrupt_the_audio(fx: object, move) -> None:
+    """拖滑桿時聲音不可以斷。
+
+    這條是實測抓到的：UI 每動一格就重建級聯，而級聯會對每一級重新
+    prepare —— Spatial 的輸出佇列因此被清空、重新預填一個視窗的靜音。
+    修正前每一格都有 2121 樣本（44 ms）的斷音，拖一次滑桿就斷好幾次。
+    """
+    import numpy as np
+
+    controller, engine, _ = fx
+    controller.setEqEnabled(True)
+    controller.setSpatialAmount(0.5)
+
+    rate = engine.sample_rate
+    t = np.arange(rate * 2) / rate
+    tone = 0.3 * np.sin(2 * np.pi * 440.0 * t)
+    signal = np.stack([tone, tone * 0.9], axis=1).astype(np.float32)
+
+    block = 1024
+    out = []
+    for index, start in enumerate(range(0, len(signal), block)):
+        if index == 50:
+            move(controller)
+        chunk = signal[start : start + block].reshape(-1).copy()
+        engine.graph.process(chunk)
+        out.append(chunk.reshape(-1, 2)[:, 0])
+    left = np.concatenate(out)
+
+    # 開頭的預填靜音是正常的（那就是申報的延遲），只看穩態之後。
+    steady = left[20 * block :]
+    assert _longest_silent_run(steady) < 8
+    assert not engine.graph.degraded
+
+
 # ------------------------------------------------------------------ 曲線不可以憑空消失
 
 

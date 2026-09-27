@@ -329,6 +329,12 @@ class LevelMeter:
     削波數的語意是**事件數**：一段連續超過滿刻度的樣本算一次，
     連段跨區塊也會正確接續。所以一首整段爆掉的歌不會顯示幾十萬，
     而是顯示它實際有幾處撞頂。
+
+    **吃的是各聲道原本的樣本，不是單聲道混音。** 以前餵的是 ``(L+R)/2``：
+    左聲道連續撞頂 100 個樣本、右聲道安靜時，混音只有 0.5 —— 回報 0 次削波、
+    峰值 −6 dBFS；左右反相撞頂時混音甚至是 0。削波與峰值是**每一個聲道**
+    的性質，混音只會把它們藏起來。RMS 因此也是各聲道功率的平均（與
+    BS.1770 一樣不先混音），而不是混音的功率。
     """
 
     def __init__(self) -> None:
@@ -345,24 +351,46 @@ class LevelMeter:
         self._clipped = 0
         self._run = 0
 
-    def feed(self, mono: FloatArray) -> None:
-        if mono.size == 0:
+    def feed(self, samples: FloatArray, channels: int = 1) -> None:
+        """餵入交錯的 PCM。``channels`` 是聲道數；長度不整除時捨去尾巴的殘框。"""
+        usable = (samples.size // channels) * channels
+        if usable == 0:
             return
-        magnitude = np.abs(mono)
-        self._square_sum += float(np.sum(np.square(mono, dtype=np.float64)))
-        self._samples += int(mono.size)
+        frames = samples[:usable].reshape(-1, channels)
+        magnitude = np.abs(frames)
+        self._square_sum += float(np.sum(np.square(frames, dtype=np.float64)))
+        self._samples += int(usable)
         self._peak = max(self._peak, float(magnitude.max()))
-        self._count_clipping(magnitude >= CLIP_THRESHOLD)
+        # 任一聲道撞頂，這一框就算撞頂。連段以「框」計，所以左右同時撞頂
+        # 不會被算成兩次。
+        self._count_clipping(np.asarray((magnitude >= CLIP_THRESHOLD).any(axis=1), dtype=np.bool_))
 
     def _count_clipping(self, hot: npt.NDArray[np.bool_]) -> None:
-        """數出長度達 ``CLIP_RUN_LENGTH`` 的滿刻度連段，狀態跨區塊延續。"""
-        for value in hot:
-            if value:
-                self._run += 1
-                if self._run == CLIP_RUN_LENGTH:
-                    self._clipped += 1
-            else:
-                self._run = 0
+        """數出長度達 ``CLIP_RUN_LENGTH`` 的滿刻度連段，狀態跨區塊延續。
+
+        向量化：找出每一段連續為真的起訖，而不是逐樣本跑 Python 迴圈
+        （48 kHz 立體聲每秒九萬六千次迭代，全在 UI 執行緒上）。
+        """
+        if hot.size == 0:
+            return
+        edges = np.diff(np.concatenate(([0], hot.astype(np.int8), [0])))
+        starts = np.flatnonzero(edges == 1)
+        ends = np.flatnonzero(edges == -1)
+        lengths = ends - starts
+        if starts.size and starts[0] == 0:
+            # 第一段接續上一塊留下的連段。上一塊已經達標的話它早就算過了，
+            # 這裡只看「接上之後是不是剛好跨過門檻」。
+            carried = self._run
+            lengths[0] += carried
+            if carried >= CLIP_RUN_LENGTH:
+                lengths[0] = 0
+        self._clipped += int(np.count_nonzero(lengths >= CLIP_RUN_LENGTH))
+        # 這一塊結尾還在撞頂的話，把連段長度帶到下一塊。
+        if hot[-1]:
+            tail = int(ends[-1] - starts[-1])
+            self._run = tail + (self._run if starts[-1] == 0 else 0)
+        else:
+            self._run = 0
 
     def stats(self) -> LevelStats:
         if self._samples == 0:
