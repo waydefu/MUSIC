@@ -435,3 +435,63 @@ def test_cues_soften_monotonically() -> None:
     ]
     assert ripples == sorted(ripples, reverse=True), f"起伏沒有單調下降：{ripples}"
     assert ripples[-1] < ripples[0] * 0.5, "柔化到底卻幾乎沒變，滑桿等於沒接上"
+
+
+# ------------------------------------------------------------------ 置中補償
+
+
+def test_centre_compensation_restores_the_centre_response() -> None:
+    """補償乘上 ``front_sum`` 之後就是中置喇叭的響應 —— 振幅與相位都是。
+
+    兩支 ±30° 喇叭餵同樣訊號時 ``H_i + H_c`` 會相消（純置中內容在 1.5 kHz
+    凹 8.5 dB），補償就是把它補回中置喇叭的樣子。只補振幅不夠：amount<1 時
+    濕訊號要與乾訊號相加，相位翻轉約 π 的地方就互相抵消。
+    """
+    filters = synthetic_filters(SAMPLE_RATE, FFT)
+    log_magnitude, phase = filters.centre_compensation()
+    restored = filters.front_sum * np.exp(log_magnitude + 1j * phase)
+
+    limit = 10.0 ** (12.0 / 20.0)
+    ratio = np.abs(filters.centre / filters.front_sum)
+    unclipped = (ratio > 1.0 / limit) & (ratio < limit)
+    assert unclipped.mean() > 0.5, "大部分頻率都該在夾限範圍內，否則這條測試量不到東西"
+    assert np.allclose(restored[unclipped], filters.centre[unclipped], atol=1e-9)
+
+
+def test_centre_compensation_is_bounded() -> None:
+    """振幅夾在 ±12 dB（與佈局補償同一個理由：量測的極端值不可靠）。"""
+    filters = synthetic_filters(SAMPLE_RATE, FFT)
+    log_magnitude, _ = filters.centre_compensation()
+    assert float(np.abs(log_magnitude).max()) <= np.log(10.0 ** (12.0 / 20.0)) + 1e-12
+
+
+def test_centre_compensation_has_a_short_impulse_response() -> None:
+    """補償濾波器的脈衝響應要短，否則頻域相乘的環形卷積會把能量繞到負時間。
+
+    （renderer 另外把置中權重沿頻率平滑，因為 ``w·φ`` 在相鄰格之間亂跳同樣會
+    鋪滿整個視窗 —— 那條由 ``test_diffuse_transient_has_no_pre_echo`` 守著。）
+    """
+    filters = synthetic_filters(SAMPLE_RATE, FFT)
+    log_magnitude, phase = filters.centre_compensation()
+    response = np.fft.irfft(np.exp(log_magnitude + 1j * phase), FFT)
+    energy = response**2
+    assert energy[: int(0.003 * SAMPLE_RATE)].sum() / energy.sum() > 0.98
+    assert energy[FFT // 2 :].sum() / energy.sum() < 0.02
+
+
+def test_centre_compensation_leaves_the_interaural_cues_alone() -> None:
+    """補償是左右耳共用的一個複數，所以兩耳的振幅比與相位差完全不變。
+
+    用 sum/diff 形式驗：近耳 = sum + diff、遠耳 = sum − diff，兩者都乘上同一個
+    因子 ``C`` 之後，``近耳 / 遠耳`` 必須原封不動 —— ILD 與 ITD 都在這個比值裡。
+    """
+    filters = synthetic_filters(SAMPLE_RATE, FFT)
+    log_magnitude, phase = filters.centre_compensation()
+    shared = np.exp(0.7 * (log_magnitude + 1j * phase))  # 任意的部分權重
+
+    near = filters.front_sum + filters.front_diff
+    far = filters.front_sum - filters.front_diff
+    usable = np.abs(far) > 1e-6
+    before = near[usable] / far[usable]
+    after = (near * shared)[usable] / (far * shared)[usable]
+    assert np.allclose(before, after)

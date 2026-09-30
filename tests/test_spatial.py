@@ -15,7 +15,7 @@ import pytest
 from aurora.core.abcompare import compare, estimate_latency_frames
 from aurora.core.constants import SPATIAL_FFT_SIZE, SPATIAL_HOP
 from aurora.core.dsp_graph import DspGraph
-from aurora.core.hrtf import SYNTHETIC_PROFILE
+from aurora.core.hrtf import SYNTHETIC_PROFILE, ear_pair
 from aurora.core.spatial import SpatialUpmix
 
 FloatArray = npt.NDArray[np.float32]
@@ -736,3 +736,123 @@ def test_binaural_puts_diffuse_content_near_zero() -> None:
     """
     signal = _diffuse_content()
     assert abs(_iacc(_binaural(1.0), signal)) < abs(_iacc(_make(1.0), signal))
+
+
+# ------------------------------------------------------------------ 聲像：偏位的樂器要留在原位
+
+
+def _virtual_stereo_reference(signal: FloatArray) -> np.ndarray:
+    """**獨立的**參考：左聲道在 −30°、右聲道在 +30°，逐喇叭、逐耳算。
+
+    不走 renderer 的 M/S 捷徑，也不經過 STFT —— 就是把兩支真喇叭的脈衝響應
+    直接乘上去。renderer 可以有自己的做法，但偏位樂器的左右耳音量差不該
+    與這條參考差太多。
+    """
+    left, right = _channels_of(signal)
+    size = 1 << int(np.ceil(np.log2(left.size + 4096)))
+    near, far = ear_pair(RATE, size, 30.0)
+    x_left, x_right = np.fft.rfft(left, size), np.fft.rfft(right, size)
+    ear_left = np.fft.irfft(x_left * near + x_right * far, size)[: left.size]
+    ear_right = np.fft.irfft(x_left * far + x_right * near, size)[: left.size]
+    return np.stack([ear_left, ear_right], axis=1).astype(np.float32).reshape(-1)
+
+
+def _band_ild_db(signal: FloatArray, low: float, high: float) -> float:
+    """左耳比右耳大聲幾 dB（只看穩態的中段，避開 STFT 暖機）。"""
+    left, right = _channels_of(signal)
+    segment = slice(RATE, RATE * 3)
+    window = np.hanning(RATE * 2)
+    freqs = np.fft.rfftfreq(RATE * 2, 1.0 / RATE)
+    band = (freqs >= low) & (freqs < high)
+    power_left = float(np.sum(np.abs(np.fft.rfft(left[segment] * window))[band] ** 2))
+    power_right = float(np.sum(np.abs(np.fft.rfft(right[segment] * window))[band] ** 2))
+    return 10.0 * float(np.log10(power_left / power_right))
+
+
+def _panned_noise(ild_db: float) -> FloatArray:
+    """同一個聲源，右聲道比左聲道小 ``ild_db`` —— 混音師用音量差擺出來的位置。"""
+    source = np.random.default_rng(7).standard_normal(RATE * 4) * 0.2
+    return _stereo(source, source * 10 ** (-ild_db / 20.0))
+
+
+PANNED_ILD_DB = (1.5, 3.0, 6.02, 12.0, 20.0)
+
+
+@pytest.mark.parametrize("ild_db", PANNED_ILD_DB)
+def test_binaural_keeps_a_panned_source_where_the_mix_put_it(ild_db: float) -> None:
+    """**偏位樂器的左右耳音量差，要與兩支 ±30° 真喇叭一致（誤差 < 1 dB）。**
+
+    這是聲像的地基，比「夠不夠寬」重要得多：混音師把吉他擺在左邊是有意圖的，
+    處理器不該把它搬走。
+
+    修正前直達聲的 mid 會按「有多置中」分一份進 0° 中置喇叭，同一個聲源同時
+    走 0° 與 ±30° 兩條路徑，複數相加的干涉把 ILD 吃掉：偏左 6 dB 的輸入在
+    2–6 kHz 是 −1.4 dB（方向反了，參考是 +4.0 dB）、全頻只剩 +0.7 對 +4.0 dB。
+    把 ``centred`` 取 4 次方、8 次方都修不好 —— 那是結構問題，不是曲線的問題。
+
+    參考是獨立算的（逐喇叭逐耳，不走 M/S 捷徑），見 :func:`_virtual_stereo_reference`。
+    """
+    signal = _panned_noise(ild_db)
+    output = _run(_binaural(1.0), signal)[LATENCY * CHANNELS :]
+    reference = _virtual_stereo_reference(signal)
+
+    for low, high in ((100.0, 16000.0), (250.0, 1000.0), (2000.0, 6000.0)):
+        measured = _band_ild_db(output, low, high)
+        expected = _band_ild_db(reference, low, high)
+        assert abs(measured - expected) < 1.0, (
+            f"輸入 {ild_db} dB、{low:.0f}–{high:.0f} Hz：renderer {measured:+.2f} dB，"
+            f"±30° 參考 {expected:+.2f} dB"
+        )
+
+
+def test_binaural_never_flips_a_panned_source_to_the_other_side() -> None:
+    """輸入偏左，輸出在中高頻就不可以偏右 —— 上面那條量的是「準不準」，這條守「方向」。"""
+    for ild_db in PANNED_ILD_DB:
+        output = _run(_binaural(1.0), _panned_noise(ild_db))[LATENCY * CHANNELS :]
+        assert _band_ild_db(output, 2000.0, 6000.0) > 0.0, f"{ild_db} dB 的偏左輸入在中高頻偏到右邊"
+
+
+def test_binaural_panning_is_monotonic() -> None:
+    """輸入越往左，輸出不可以反而往右走。
+
+    修正前兩條路徑的干涉讓曲線不單調（輸入 6 dB 的 2–6 kHz 是 −1.4 dB，
+    輸入 12 dB 才回到 +3.9 dB）。
+    """
+    ilds = [
+        _band_ild_db(_run(_binaural(1.0), _panned_noise(d))[LATENCY * CHANNELS :], 2000.0, 6000.0)
+        for d in (0.0, *PANNED_ILD_DB)
+    ]
+    assert ilds == sorted(ilds), f"2–6 kHz 的 ILD 不單調：{[round(v, 2) for v in ilds]}"
+
+
+@pytest.mark.parametrize("amount", [1.0, 0.5])
+def test_binaural_centred_content_keeps_its_timbre(amount: float) -> None:
+    """置中內容（人聲）的音色不可以因為拿掉中置喇叭而變薄。
+
+    **這條守的是上一條的副作用。** 只把中置喇叭拿掉（直達聲全走 ±30° 那一對）
+    可以讓 ILD 完全正確，但兩支喇叭餵同樣的訊號時，到耳朵的 ``H_i + H_c``
+    在 1.9 kHz 附近相消：純置中內容在 1.5 kHz 凹 8.5 dB，amount=0.5 與乾訊號
+    相加時更在 4 kHz 凹 11 dB（相位翻轉、互相抵消）—— 落在人聲最敏感的頻段上。
+    這正是當初留著中置喇叭的理由。
+
+    所以 renderer 另外乘一個左右耳共用的複數補償（見
+    ``HrtfFilters.centre_compensation``）。只補振幅不夠：實測 amount=0.5 時
+    仍是 −12.4 dB，相位也要補。
+    """
+    source = np.random.default_rng(7).standard_normal(RATE * 4) * 0.2
+    signal = _stereo(source, source)
+    output = _run(_binaural(amount), signal)[LATENCY * CHANNELS :]
+    left, _ = _channels_of(output)
+    original, _ = _channels_of(signal)
+
+    segment = slice(RATE, RATE * 3)
+    window = np.hanning(RATE * 2)
+    freqs = np.fft.rfftfreq(RATE * 2, 1.0 / RATE)
+    power_out = np.abs(np.fft.rfft(left[segment] * window)) ** 2
+    power_in = np.abs(np.fft.rfft(original[segment] * window)) ** 2
+    levels = []
+    for centre in np.geomspace(100.0, 12000.0, 40):
+        band = (freqs >= centre * 2 ** (-1 / 6)) & (freqs < centre * 2 ** (1 / 6))
+        levels.append(10.0 * np.log10(power_out[band].sum() / power_in[band].sum()))
+    spread = max(levels) - min(levels)
+    assert spread < 3.0, f"置中內容的頻響起伏 {spread:.1f} dB（只拿掉中置喇叭時是 11 dB）"

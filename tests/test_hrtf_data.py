@@ -438,3 +438,32 @@ def test_switching_profile_reloads_the_filters(tmp_path: Path, monkeypatch) -> N
 
     upmix.hrtf_profile = "ku100"
     assert upmix.hrtf_is_measured
+
+
+def test_centre_compensation_survives_exact_nulls_in_measured_data(tmp_path: Path) -> None:
+    """實測資料的 ``front_sum`` 可以有精確的零點，補償不可以爆成 NaN／Inf。
+
+    兩個等振幅的脈衝相加（近耳 18 個取樣、遠耳 30 個取樣）在 ``cos`` 的零點上
+    恰好是 0 —— 補償是 ``centre / front_sum``，分母為零的地方要被夾住。
+    """
+
+    def spike(position: int) -> np.ndarray:
+        response = np.zeros(TAPS)
+        response[position] = 1.0
+        return response
+
+    path = tmp_path / "nulls.npz"
+    np.savez(
+        path,
+        sample_rate=np.int32(RATE),
+        azimuths=np.asarray([0.0, 30.0, 110.0]),
+        ipsi=np.asarray([spike(24), spike(18), spike(8)]),
+        contra=np.asarray([spike(24), spike(30), spike(40)]),
+    )
+    filters = load_filters(RATE, FFT, path)
+    assert filters is not None
+
+    log_magnitude, phase = filters.centre_compensation()
+    assert np.isfinite(log_magnitude).all()
+    assert np.isfinite(phase).all()
+    assert float(np.abs(log_magnitude).max()) <= np.log(10.0 ** (12.0 / 20.0)) + 1e-12
