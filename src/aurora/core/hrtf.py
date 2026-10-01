@@ -20,14 +20,21 @@
 **兩對喇叭走的是同一條規則**：餵法的和進 mid、差進 side。代進場景
 （見 ``spatial.py`` 的 ``_build_scene``）::
 
-    C                → 置中喇叭，兩耳相同
-    FL / FR = front_mid ± s          ⇒ 和 = front_mid、差 = s
+    FL / FR = P_m ± P_s              ⇒ 和 = P_m、差 = P_s      （直達聲）
     SL / SR = u·D₁ , u·D₂            ⇒ 和 = u·(D₁+D₂)/2、差 = u·(D₁−D₂)/2
 
 於是::
 
-    M_out = C·H_0 + front_mid·H_sum(30°) + u·(D₁+D₂)/2 · H_sum(110°)
-    S_out =         s·H_diff(30°)        + u·(D₁−D₂)/2 · H_diff(110°)
+    M_out = P_m·H_sum(30°) · C + u·(D₁+D₂)/2 · H_sum(110°)
+    S_out = P_s·H_diff(30°) · C + u·(D₁−D₂)/2 · H_diff(110°)
+
+其中 ``C`` 是左右耳共用的置中補償（:meth:`HrtfFilters.centre_compensation`）。
+
+**直達聲只走 ±30° 那一對，沒有獨立的 0° 中置喇叭。** 以前直達聲的 mid 會按
+「有多置中」分一份進中置喇叭（``C·H_0``），同一個聲源同時走 0° 與 ±30° 兩條
+路徑，複數相加的干涉把偏位樂器的 ILD 吃掉：偏左 6 dB 的輸入在 2–6 kHz 反而
+是 −1.4 dB，方向反了（正確是 +4.0 dB）。現在 ``H_0`` 只當作補償的**目標響應**
+—— 理由與實測見 :meth:`HrtfFilters.centre_compensation`。
 
 **一對喇叭的濾波器要各承擔一半。** ``H_sum(θ) = H_i + H_c`` 在低頻趨近
 ``2·H_0``（兩耳都聽得到、而且幾乎一樣），但場景那一邊給的權重是 1 ——
@@ -95,6 +102,7 @@ from aurora.core.constants import (
 from aurora.core.paths import hrtf_dir, hrtf_file
 
 ComplexArray = npt.NDArray[np.complex128]
+RealArray = npt.NDArray[np.float64]
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +113,8 @@ class HrtfFilters:
     SOFA 載入器都產生這個型別，``spatial.py`` 不需要知道差別。
     """
 
-    #: 置中喇叭到兩耳（左右相同，所以只有一條）。
+    #: 置中喇叭到兩耳（左右相同，所以只有一條）。renderer 不再把直達聲送進這支
+    #: 喇叭，它只當作 :meth:`centre_compensation` 的目標響應（置中內容該有的音色）。
     centre: ComplexArray
     #: 前方喇叭對的和 —— 作用在 mid 成分上。
     front_sum: ComplexArray
@@ -210,6 +219,46 @@ class HrtfFilters:
             self.front_sum - self.front_diff,
             self.surround_sum + self.surround_diff,
             self.surround_sum - self.surround_diff,
+        )
+
+    def centre_compensation(self) -> tuple[RealArray, RealArray]:
+        """把「只走 ±30° 那一對」的置中內容，補回與正前方喇叭相同的響應。
+
+        回傳 ``(log_magnitude, phase)``：補償係數 ``C = centre / front_sum``
+        的對數振幅（已夾在 ±:data:`HRTF_EQ_LIMIT_DB`）與**展開過的**相位。
+        renderer 以 ``exp(w · (log_magnitude + j·phase))`` 套用，``w`` 是這一格
+        的直達聲有多置中（0～1）。
+
+        ## 為什麼需要它
+
+        兩支 ±30° 喇叭餵同樣的訊號時，到耳朵的是 ``H_i + H_c``：兩條路徑的
+        時間差使它在 1.9 kHz 附近相消（實測純置中內容 1.5 kHz 凹 8.5 dB，
+        amount=0.5 與乾訊號相加時更在 4 kHz 凹 11 dB）—— 這是兩支真喇叭的
+        phantom center 的固有音色，但它落在人聲最敏感的頻段上。
+
+        以前的做法是另外留一支 0° 中置喇叭，按「有多置中」分一份進去。音色是
+        平的，代價是同一個聲源同時走 0° 與 ±30° 兩條路徑，複數相加的干涉把偏位
+        樂器的 ILD 吃掉：偏左 6 dB 的輸入在 2–6 kHz 反而是 −1.4 dB（正確是
+        +4.0 dB），方向整個反過來。
+
+        這裡改成**一個共同的複數因子**：左右耳乘上同一個數，所以 ILD 與 ITD
+        （兩耳的振幅比與相位差）完全不變；置中（w=1）時整條路徑等於中置
+        喇叭的響應，偏位（w→0）時完全不動、退回純 ±30° 虛擬立體聲。
+
+        ## 為什麼連相位都要補
+
+        只補振幅（實數）在 amount=1 時夠用，但 amount<1 時濕訊號要與乾訊號相加，
+        ``front_sum`` 在零點之後相位翻轉約 π，相加就相消 —— 上面那個 −11 dB
+        沒有因為補了振幅而消失（實測 −12.4 dB）。相位要展開再乘 ``w``：
+        ``w`` 在 0 與 1 之間時是「部分對齊」，不會在 ±π 之間跳。
+        """
+        limit = 10.0 ** (HRTF_EQ_LIMIT_DB / 20.0)
+        denominator = np.where(np.abs(self.front_sum) < _EPS, _EPS, self.front_sum)
+        ratio = self.centre / denominator
+        magnitude = np.clip(np.abs(ratio), 1.0 / limit, limit)
+        return (
+            np.asarray(np.log(magnitude), dtype=np.float64),
+            np.asarray(np.unwrap(np.angle(ratio)), dtype=np.float64),
         )
 
     def with_cue_strength(self, strength: float) -> HrtfFilters:

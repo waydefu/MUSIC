@@ -75,6 +75,7 @@ import numpy.typing as npt
 from aurora.core.constants import (
     DSP_REFERENCE_RATE,
     HRTF_CUE_STRENGTH,
+    SPATIAL_CENTRE_SMOOTHING_OCTAVE,
     SPATIAL_COHERENCE_SMOOTHING,
     SPATIAL_DECORRELATION_DELAY_MS,
     SPATIAL_DECORRELATION_HP_HZ,
@@ -98,6 +99,10 @@ from aurora.core.rates import scaled_fft_size
 
 FloatArray = npt.NDArray[np.float32]
 ComplexArray = npt.NDArray[np.complex128]
+RealArray = npt.NDArray[np.float64]
+#: 雙耳 renderer 需要的一整組：濾波器，以及置中補償的（對數振幅，相位）。
+#: 綁在一起發佈 —— 切換 profile 時回呼不會讀到不配對的兩半。
+BinauralState = tuple[HrtfFilters, RealArray, RealArray]
 
 _EPS = 1e-12
 
@@ -150,7 +155,7 @@ class SpatialUpmix:
         # P2 HRTF。預設關閉 —— 關著的時候一格濾波器都不算，
         # 回呼成本與 P1 相同（§9.9 的預算決定因此不受影響）。
         self._binaural = False
-        self._hrtf: HrtfFilters | None = None
+        self._binaural_state: BinauralState | None = None
         self._hrtf_measured = False
         self._hrtf_profile = ""
         self._cue_strength = HRTF_CUE_STRENGTH
@@ -200,6 +205,12 @@ class SpatialUpmix:
         ramp = np.clip((freqs - low) / span, 0.0, 1.0)
         self._lf_guard = 0.5 - 0.5 * np.cos(np.pi * ramp)
         self._lf_guard_sq = np.square(self._lf_guard)
+
+        # 置中權重沿頻率平滑用的視窗邊界（對數頻率上的固定寬度，同 hrtf._smooth_octaves）。
+        ratio = 2.0 ** (SPATIAL_CENTRE_SMOOTHING_OCTAVE / 2.0)
+        index = np.arange(bins, dtype=np.float64)
+        self._weight_low = np.maximum(0, np.floor(index / ratio)).astype(np.int64)
+        self._weight_high = np.minimum(bins, np.ceil(index * ratio).astype(np.int64) + 1)
 
         # 全部預先配置。先前這三個用 np.concatenate 每個 hop 增長一次 ——
         # 那違反 dsp_graph 契約的規則 2（不得有可避免的穩態配置）。
@@ -288,8 +299,11 @@ class SpatialUpmix:
         path = resolve_profile(self._hrtf_profile)
         measured = load_filters(sample_rate, self._fft, path) if path is not None else None
         self._hrtf_measured = measured is not None
-        chosen = measured or synthetic_filters(sample_rate, self._fft)
-        self._hrtf = chosen.with_cue_strength(self._cue_strength)
+        chosen = (measured or synthetic_filters(sample_rate, self._fft)).with_cue_strength(
+            self._cue_strength
+        )
+        log_magnitude, phase = chosen.centre_compensation()
+        self._binaural_state = (chosen, log_magnitude, phase)
 
     @property
     def surround_level(self) -> float:
@@ -333,7 +347,7 @@ class SpatialUpmix:
         if self._binaural:
             self._load_hrtf(sample_rate)
         else:
-            self._hrtf = None
+            self._binaural_state = None
             self._hrtf_measured = False
         # 只處理立體聲。單聲道沒有左右差可分析，多聲道不在 P1 範圍。
         self._ready = channels == 2
@@ -418,7 +432,7 @@ class SpatialUpmix:
 
         primary_mid, primary_side = self._analyse(mid, side)
         scene = self._build_scene(mid, side, primary_mid, primary_side)
-        if self._binaural and self._hrtf is not None:
+        if self._binaural and self._binaural_state is not None:
             out_mid, out_side = self._render_binaural(*scene, mid, side)
         else:
             out_mid, out_side = self._render_stereo(*scene, mid, side)
@@ -594,22 +608,34 @@ class SpatialUpmix:
 
         場景與 :meth:`_render_stereo` 完全相同，差別只在虛擬喇叭不再是直接
         折回左右聲道，而是各自經過該方位角的 HRTF。因為場景是 M/S 表示，
-        整段可以留在 M/S 域，只要五條濾波器 —— 推導寫在 ``core/hrtf.py``
+        整段可以留在 M/S 域，只要四條濾波器 —— 推導寫在 ``core/hrtf.py``
         的模組 docstring，並由 ``tests/test_hrtf.py`` 對逐喇叭參考實作驗證。
 
-        mid 在中置喇叭與前方那一對之間怎麼分，看的是**直達聲有多置中**：
-        ``2·|P_L|·|P_R| / (|P_L|² + |P_R|²)``（直達成分的左右振幅相似度），
-        置中是 1、偏左 6 dB 是 0.8、硬偏位是 0。只看振幅不看相位 —— 看相位的
-        話，時間差立體聲又會隨頻率在中置與前方之間來回跳，那正是這次拿掉
-        ``Re(L·R*)`` 的理由。環境音的 mid 留在前方那一對（它沒有「置中」可言）。
+        **直達聲只走 ±30° 那一對，沒有 0° 中置喇叭。** 這等於把立體聲當成
+        兩支真喇叭來聽：左聲道在 −30°、右聲道在 +30°，置中的人聲是兩支喇叭
+        在中間形成的 phantom center，偏位的樂器則保留混音師用兩聲道音量差
+        擺好的位置。
+
+        以前直達聲的 mid 會按「有多置中」分一份進 0° 中置喇叭。同一個聲源同時
+        走 0° 與 ±30° 兩條路徑，複數相加的干涉把偏位樂器的 ILD 吃掉了：偏左
+        6 dB 的輸入在 2–6 kHz 是 −1.4 dB，方向反過來（正確是 +4.0 dB，全頻
+        +0.7 對 +4.0 dB）。把 ``centred`` 取 4 次方、8 次方都修不好 —— 那是
+        結構問題，不是曲線的問題。
+
+        只拿掉中置喇叭的代價是 phantom center 的音色：置中內容在 1.5 kHz
+        凹 8.5 dB。所以直達聲在這條路徑上另外乘一個**左右耳共用的複數因子**
+        （:meth:`HrtfFilters.centre_compensation`），依這一格有多置中加權：
+        置中時補回中置喇叭的響應，偏位時完全不動。共用的因子不改變兩耳的
+        振幅比與相位差，所以補償不會碰到 ILD 與 ITD。
 
         **與 stereo renderer 的一個刻意差異**：這裡的 side 也跟乾訊號做
         交叉淡入。stereo renderer 把 width 直接乘在乾 side 上（``width=1``
         時那就是原訊號，天然透明），但 HRTF 會改變 side 的頻譜，
         不淡入的話 ``amount=0`` 就不再是旁通了。
         """
-        hrtf = self._hrtf
-        assert hrtf is not None  # 呼叫端已經檢查過
+        state = self._binaural_state
+        assert state is not None  # 呼叫端已經檢查過
+        hrtf, log_magnitude, phase = state
         amount = self._amount
         gain, width, depth = self._wet_coefficients()
 
@@ -618,23 +644,34 @@ class SpatialUpmix:
         near_mid = dry_mid - primary_mid * push
         near_side = dry_side - primary_side * push
 
+        # 這一格的直達聲有多置中：``2·|P_L|·|P_R| / (|P_L|² + |P_R|²)``，
+        # 置中是 1、偏左 6 dB 是 0.8、硬偏位是 0。只看左右振幅不看相位 ——
+        # 看相位的話，時間差立體聲又會隨頻率在置中與偏位之間來回跳。
         direct_l = np.abs(primary_mid + primary_side) ** 2
         direct_r = np.abs(primary_mid - primary_side) ** 2
-        centred = 2.0 * np.sqrt(direct_l * direct_r) / np.maximum(direct_l + direct_r, _EPS)
-        centre = primary_mid * depth * centred
-        front_mid = near_mid - centre
+        power = direct_l + direct_r
+        centred = 2.0 * np.sqrt(direct_l * direct_r) / np.maximum(power, _EPS)
+
+        # **權重要沿頻率平滑**（直達功率加權）。它會變成相位的乘數 ``w·φ``，
+        # 每一格各自算的話相鄰格的 ``w`` 差很多，相位在頻率方向上亂跳，脈衝
+        # 響應鋪滿視窗而繞回負時間 —— 實測擴散瞬態前的能量被抬到 −15 dB。
+        # 見 :data:`SPATIAL_CENTRE_SMOOTHING_OCTAVE`。
+        weighted = np.concatenate(([0.0], np.cumsum(centred * power)))
+        total = np.concatenate(([0.0], np.cumsum(power)))
+        low, high = self._weight_low, self._weight_high
+        weight = (weighted[high] - weighted[low]) / np.maximum(total[high] - total[low], _EPS)
+        shared = np.exp(weight * (log_magnitude + 1j * phase))
 
         # 兩對喇叭走同一條規則：餵法的和進 mid、差進 side。環繞餵的是兩條
         # 去相關訊號（見 _configure 的說明），所以它**也**有 mid 成分 ——
         # 那是不讓音場塌成純反相的關鍵。
         surround = ambience_side * (gain * self._lf_guard)
         wet_mid = (
-            centre * hrtf.centre
-            + front_mid * hrtf.front_sum
+            near_mid * hrtf.front_sum * shared
             + surround * self._surround_feed_sum * hrtf.surround_sum
         )
         wet_side = (
-            near_side * width * hrtf.front_diff
+            near_side * width * hrtf.front_diff * shared
             + surround * self._surround_feed_diff * hrtf.surround_diff
         )
 
