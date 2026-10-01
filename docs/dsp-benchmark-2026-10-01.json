@@ -1,0 +1,58 @@
+[
+  {
+    "pair": 0,
+    "mode": "stereo",
+    "variant": "before",
+    "mean": 1.746,
+    "p50": 1.701
+  },
+  {
+    "pair": 0,
+    "mode": "stereo",
+    "variant": "after",
+    "mean": 1.818,
+    "p50": 1.771
+  },
+  {
+    "pair": 0,
+    "mode": "binaural",
+    "variant": "before",
+    "mean": 1.897,
+    "p50": 1.871
+  },
+  {
+    "pair": 0,
+    "mode": "binaural",
+    "variant": "after",
+    "mean": 1.967,
+    "p50": 1.951
+  },
+  {
+    "pair": 1,
+    "mode": "stereo",
+    "variant": "after",
+    "mean": 1.779,
+    "p50": 1.74
+  },
+  {
+    "pair": 1,
+    "mode": "stereo",
+    "variant": "before",
+    "mean": 1.72,
+    "p50": 1.678
+  },
+  {
+    "pair": 1,
+    "mode": "binaural",
+    "variant": "after",
+    "mean": 1.999,
+    "p50": 1.957
+  },
+  {
+    "pair": 1,
+    "mode": "binaural",
+    "variant": "before",
+    "mean": 1.98,
+    "p50": 1.931
+  }
+]

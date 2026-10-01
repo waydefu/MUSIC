@@ -271,15 +271,27 @@ REFLECTION_NEAR_SHARE: Final = REFLECTION_CROSSFEED
 
 # ---------------------------------------------------------------- 限幅與電表
 
-#: 限幅器門檻（線性振幅）。留 0.5 dB 餘裕，避免轉檔或 DAC 端的
-#: 取樣間峰值（inter-sample peak）超過滿刻度。
-LIMITER_CEILING: Final = 0.944
+#: True-peak 門檻（線性振幅），−1 dBTP。只在音效鏈啟用時生效。
+LIMITER_CEILING: Final = 10.0 ** (-1.0 / 20.0)
+#: 4× 插值：原樣本加三個分數相位，不配置完整的升頻音訊。
+LIMITER_TRUE_PEAK_FACTOR: Final = 4
+#: 每相位 513 抽頭。短且強加窗的 sinc 會漏掉接近 Nyquist 的峰值；
+#: 用 FFT 卷積承擔長核心的成本。矩形截斷保留高頻，另以數值餘裕守截斷誤差。
+LIMITER_TRUE_PEAK_TAPS: Final = 513
+#: 有限 FIR、4× 格點與時變增益的數值餘裕；另以 8× oracle 驗證。
+#: 不是任意連續時間重建或編碼後峰值的絕對保證。
+LIMITER_TRUE_PEAK_MARGIN_DB: Final = 0.4
+#: 限幅偵測器的 FFT 工作區上限。prepare 的框數提示可大於實際回呼，
+#: 大區塊分段處理，避免每次 2880 框回呼都誤用 8192／16384 點 FFT。
+LIMITER_FFT_SIZE: Final = 4096
 #: 前瞻長度（框）。64 @48k ≈ 1.3 ms —— 夠讓增益在峰值抵達前降下來，
 #: 又短到不會明顯增加延遲。
 LIMITER_LOOKAHEAD_FRAMES: Final = 64
 #: 增益回復速率（dB／秒）。慢回復比較不容易聽出抽吸感；
 #: 這是 safety net 不是 loudness maximizer，回復慢一點沒有壞處。
 LIMITER_RELEASE_DB_PER_SEC: Final = 40.0
+#: IACC 搜尋的耳間時間差範圍（毫秒），呼叫端另行選擇頻帶與時間窗。
+IACC_MAX_LAG_MS: Final = 1.0
 
 # ---------------------------------------------------------------- 即時頻譜
 
