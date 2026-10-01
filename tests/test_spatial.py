@@ -13,6 +13,7 @@ import numpy.typing as npt
 import pytest
 
 from aurora.core.abcompare import compare, estimate_latency_frames
+from aurora.core.acoustics import zero_lag_correlation
 from aurora.core.constants import SPATIAL_FFT_SIZE, SPATIAL_HOP
 from aurora.core.dsp_graph import DspGraph
 from aurora.core.hrtf import SYNTHETIC_PROFILE, ear_pair
@@ -90,13 +91,45 @@ def _channels_of(signal: FloatArray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _correlation(a: np.ndarray, b: np.ndarray) -> float:
-    x, y = a - a.mean(), b - b.mean()
-    denominator = float(np.linalg.norm(x) * np.linalg.norm(y))
-    return 0.0 if denominator == 0.0 else float(np.dot(x, y) / denominator)
+    return zero_lag_correlation(a, b)
 
 
 def _rms(samples: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(samples, dtype=np.float64))))
+
+
+@pytest.mark.parametrize("amplitude", [1.0, 1e-3, 1e-6, 1e-12])
+def test_primary_projection_is_independent_of_amplitude(amplitude: float) -> None:
+    """共變異的特徵向量與 Wiener 比例不能因音量變小而消失。"""
+    processor = _make(1.0)
+    bins = SPATIAL_FFT_SIZE // 2 + 1
+    mid = np.full(bins, amplitude, dtype=np.complex128)
+    side = mid * (0.3 + 0.2j)
+    primary_mid, primary_side = processor._analyse(mid, side)
+    assert np.allclose(primary_mid / amplitude, mid / amplitude, atol=1e-12, rtol=0)
+    assert np.allclose(primary_side / amplitude, side / amplitude, atol=1e-12, rtol=0)
+
+
+def test_primary_projection_matches_independent_eigensolver() -> None:
+    """一般複數共變異對 NumPy eigh 的獨立投影參考，不只測秩 1 特例。"""
+    rng = np.random.default_rng(509)
+    processor = _make(1.0)
+    bins = SPATIAL_FFT_SIZE // 2 + 1
+    for _ in range(16):
+        mid = rng.normal(size=bins) + 1j * rng.normal(size=bins)
+        side = rng.normal(size=bins) + 1j * rng.normal(size=bins)
+        actual = np.column_stack(processor._analyse(mid, side))
+    covariance = np.empty((bins, 2, 2), dtype=np.complex128)
+    covariance[:, 0, 0] = processor._smoothed_m
+    covariance[:, 1, 1] = processor._smoothed_s
+    covariance[:, 0, 1] = processor._smoothed_cross
+    covariance[:, 1, 0] = processor._smoothed_cross.conj()
+    values, axes = np.linalg.eigh(covariance)
+    primary = axes[:, :, 1]
+    coefficient = np.sum(primary.conj() * np.column_stack((mid, side)), axis=1)
+    wiener = (values[:, 1] - values[:, 0]) / values[:, 1]
+    expected = primary * (coefficient * wiener)[:, None]
+    assert np.allclose(actual, expected, atol=1e-12, rtol=0)
 
 
 # ------------------------------------------------------------------ 透明度
@@ -666,8 +699,8 @@ def test_binaural_does_not_collapse_to_mono() -> None:
     assert _correlation(left, right) < 0.99
 
 
-def _iacc(processor: SpatialUpmix, signal: FloatArray) -> float:
-    """耳間相關性（IACC）。真實的雙耳渲染不會讓一般音樂變成反相。"""
+def _zero_lag_correlation(processor: SpatialUpmix, signal: FloatArray) -> float:
+    """零延遲 Pearson 相關（有正負號），用於反相護欄；不是 IACC。"""
     output = _run(processor, signal)[LATENCY * CHANNELS :]
     left, right = _channels_of(output)
     return _correlation(left, right)
@@ -678,12 +711,12 @@ def test_binaural_is_never_more_anti_phase_than_stereo() -> None:
 
     方向是不對稱的，所以斷言也要不對稱：經過 HRTF 之後低頻的耳間差本來就
     比直接折回立體聲小（兩支前方喇叭在 ±30°，低頻幾乎同時到達兩耳），
-    所以 IACC 比 stereo 高是**物理上該有的**。會傷人的只有另一個方向 ——
+    所以零延遲相關比 stereo 高是**物理上該有的**。會傷人的只有另一個方向 ——
     反相音場聽起來是「在頭裡面」，正好是頭外化的反面。
     """
     signal = _program()
     for amount in (0.25, 0.5, 0.75, 1.0):
-        binaural, stereo = _iacc(_binaural(amount), signal), _iacc(_make(amount), signal)
+        binaural, stereo = _zero_lag_correlation(_binaural(amount), signal), _zero_lag_correlation(_make(amount), signal)
         assert binaural >= stereo - 0.05, f"amount={amount}：binaural {binaural:+.3f} 比 stereo {stereo:+.3f} 更反相"
 
 
@@ -712,30 +745,30 @@ def test_binaural_does_not_invert_the_soundstage() -> None:
 
     這條是修出來的，不是一開始就綠的。環繞原本沿用 P1 折回立體聲的 ±u
     （完全反相）餵法：在立體聲下那只是加寬，但反相的一對在 M/S 推導裡
-    「和」恆為 0，過了 HRTF 就只剩純反相的 side —— 實測 IACC 掉到 −0.45，
+    「和」恆為 0，過了 HRTF 就只剩純反相的 side —— 實測零延遲相關掉到 −0.45，
     聽起來是「在頭裡面」，正好是頭外化的反面。改成餵兩條互不相關的訊號
     之後回到 +0.00。
 
     門檻設在 −0.05 而不是 0：要守的物理性質是「不得反相」，不是「必須正到
     某個數字」。全開時本來就該是很寬的音場。
     """
-    assert _iacc(_binaural(1.0), _program()) > -0.05
+    assert _zero_lag_correlation(_binaural(1.0), _program()) > -0.05
 
 
 def test_binaural_stays_clearly_positive_below_full() -> None:
     """日常會用到的設定要維持明確的正相關。"""
-    assert _iacc(_binaural(0.75), _program()) > 0.15
+    assert _zero_lag_correlation(_binaural(0.75), _program()) > 0.15
 
 
 def test_binaural_puts_diffuse_content_near_zero() -> None:
-    """擴散場的 IACC 本來就該接近 0，不是負的。
+    """擴散場的零延遲相關本來就該接近 0，不是負的。
 
     這裡 binaural **比 P1 的 stereo fold 更接近物理**（實測 −0.07 vs −0.44）
     —— 因為 stereo fold 只有 ±u 這一條路可走。斷言比的是「誰比較接近 0」，
     這樣如果有人把環繞改回反相餵法，這條會紅。
     """
     signal = _diffuse_content()
-    assert abs(_iacc(_binaural(1.0), signal)) < abs(_iacc(_make(1.0), signal))
+    assert abs(_zero_lag_correlation(_binaural(1.0), signal)) < abs(_zero_lag_correlation(_make(1.0), signal))
 
 
 # ------------------------------------------------------------------ 聲像：偏位的樂器要留在原位

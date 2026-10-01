@@ -254,7 +254,7 @@ class AudioFxController(QObject):
         這是**事實紀錄**，不是故障指標。以前這裡寫「EQ 的自動餘裕已經保證
         不會超過，變成 True 代表上游沒守規矩」，但自動餘裕只保證振幅響應
         ≤ 0 dB、不保證樣本峰值，而且現代母帶的峰值本來就常在限幅門檻
-        （−0.5 dBFS）以上 —— 詳見 ``core/dynamics.py`` 的模組 docstring。
+        （−1 dBTP）以上 —— 詳見 ``core/dynamics.py`` 的模組 docstring。
         """
         return self._limiter.engaged_frames > 0
 

@@ -490,19 +490,15 @@ class SpatialUpmix:
         half_gap = 0.5 * (a - b)
         spread = np.sqrt(half_gap**2 + np.abs(x) ** 2)
         largest = 0.5 * (a + b) + spread
-        # (λ₁ − λ₂)/λ₁ = 2d/λ₁。靜音時分子分母都是 0，給 0。
-        direct = 2.0 * spread / np.maximum(largest, _EPS)
-
-        # 主特徵向量有兩種等價寫法：[λ₁ − b, x*] 與 [x, λ₁ − a]。
-        # x → 0 時其中一種會退化成零向量，所以依 a ≥ b 挑不會退化的那一種。
-        mid_heavy = a >= b
-        axis_m = np.where(mid_heavy, spread + half_gap, x)
-        axis_s = np.where(mid_heavy, np.conj(x), spread - half_gap)
-        norm = np.abs(axis_m) ** 2 + np.abs(axis_s) ** 2
-        coefficient = direct * (np.conj(axis_m) * mid + np.conj(axis_s) * side) / np.maximum(
-            norm, _EPS
-        )
-        return coefficient * axis_m, coefficient * axis_s
+        # (λ₁−λ₂)·P = C−λ₂·I，所以 Wiener 投影直接是 (C−λ₂·I)/λ₁。
+        # 不必建特徵向量再正規化，也不必除以四次方單位的 norm。舊版把 norm
+        # 夾到 1e-12，安靜的純直達聲因此被誤認成環境音（音量一變，分類也變）。
+        # 唯一的零除情況是精確靜音；不對非零能量設定絕對振幅下限。
+        scale = np.zeros_like(largest)
+        np.divide(1.0, largest, out=scale, where=largest > 0.0)
+        primary_mid = ((spread + half_gap) * mid + x * side) * scale
+        primary_side = (np.conj(x) * mid + (spread - half_gap) * side) * scale
+        return primary_mid, primary_side
 
     def _build_scene(
         self,
