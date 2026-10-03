@@ -1,0 +1,1131 @@
+{
+  "date": "2026-10-03",
+  "source_head": "5c312527f9733f2e04cd8fc5920d0c7e0ae439c3",
+  "purpose": "Measured prior audit baseline, not new renderer or listening acceptance.",
+  "user_feedback": {
+    "headphone": "Sony WH-1000XM4",
+    "connection": "3.5mm",
+    "power_off": "muffled/thin/unnatural",
+    "power_on": "comfortable",
+    "spatial_50_to_60_percent": "acceptable",
+    "spatial_100_percent": "still unnatural",
+    "limiter_ab": "sounds similar",
+    "anc": "unknown",
+    "windows_enhancements": "unknown",
+    "listening_profile": "unknown",
+    "generalization": "one listener and one headset; no population claim"
+  },
+  "measurement_method": "FFmpeg loudnorm input measurement; fixed-gain aligned residual",
+  "ffmpeg_version": "ffmpeg version 9.0-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
+  "prior_exports": [
+    {
+      "file": "曲1_1_原曲.wav",
+      "sha256": "83cc2d53eb844b06fb87e23b924bf389c7bb4eae73db6620c8595d894390d291",
+      "sample_rate": 48000,
+      "channels": 2,
+      "codec": "pcm_s24le",
+      "frames": 960000,
+      "duration_s": 20.0,
+      "sample_peak_dbfs": -6.504505826288099,
+      "rms_dbfs": -14.935466578623108,
+      "integrated_lufs": -13.15,
+      "true_peak_dbtp": -5.7,
+      "nonfinite_samples": 0,
+      "samples_at_or_above_fullscale": 0
+    },
+    {
+      "file": "曲1_2_現況100%.wav",
+      "sha256": "1a6e700df770987c9905078bd5957ac1b37b983c37c8966dd8740d1901d3ab8d",
+      "sample_rate": 48000,
+      "channels": 2,
+      "codec": "pcm_s24le",
+      "frames": 960000,
+      "duration_s": 20.0,
+      "sample_peak_dbfs": -5.115439751767241,
+      "rms_dbfs": -14.935466593140234,
+      "integrated_lufs": -12.38,
+      "true_peak_dbtp": -5.1,
+      "nonfinite_samples": 0,
+      "samples_at_or_above_fullscale": 0
+    },
+    {
+      "file": "曲1_3_100%不經限幅器.wav",
+      "sha256": "040483ae1fd31fa26acac65c8c472574af006169ec3e16af3ece10cf7be34f65",
+      "sample_rate": 48000,
+      "channels": 2,
+      "codec": "pcm_s24le",
+      "frames": 960000,
+      "duration_s": 20.0,
+      "sample_peak_dbfs": -1.1100924546353714,
+      "rms_dbfs": -14.935466591592483,
+      "integrated_lufs": -12.28,
+      "true_peak_dbtp": -1.0,
+      "nonfinite_samples": 0,
+      "samples_at_or_above_fullscale": 0
+    },
+    {
+      "file": "曲2_1_原曲.wav",
+      "sha256": "fd1bd3be130d5644c6a15998eaa5e6b689e69b105ce2285c73376ea408adda72",
+      "sample_rate": 48000,
+      "channels": 2,
+      "codec": "pcm_s24le",
+      "frames": 960000,
+      "duration_s": 20.0,
+      "sample_peak_dbfs": -6.090271627866044,
+      "rms_dbfs": -14.687451832891682,
+      "integrated_lufs": -12.33,
+      "true_peak_dbtp": -5.6,
+      "nonfinite_samples": 0,
+      "samples_at_or_above_fullscale": 0
+    },
+    {
+      "file": "曲2_2_現況100%.wav",
+      "sha256": "cca7fd606c9d1690be991f2202c0801e2f06895f06893ff8cfe4e5f55fd9e9fe",
+      "sample_rate": 48000,
+      "channels": 2,
+      "codec": "pcm_s24le",
+      "frames": 960000,
+      "duration_s": 20.0,
+      "sample_peak_dbfs": -4.773409935825797,
+      "rms_dbfs": -14.687451856524161,
+      "integrated_lufs": -11.66,
+      "true_peak_dbtp": -4.77,
+      "nonfinite_samples": 0,
+      "samples_at_or_above_fullscale": 0
+    },
+    {
+      "file": "曲2_3_100%不經限幅器.wav",
+      "sha256": "921aa7bb82805e48db95f988f6af69cf021399f0f07f9abbd3d862cc76969307",
+      "sample_rate": 48000,
+      "channels": 2,
+      "codec": "pcm_s24le",
+      "frames": 960000,
+      "duration_s": 20.0,
+      "sample_peak_dbfs": -1.1045653677724196,
+      "rms_dbfs": -14.687451857248464,
+      "integrated_lufs": -11.39,
+      "true_peak_dbtp": -1.0,
+      "nonfinite_samples": 0,
+      "samples_at_or_above_fullscale": 0
+    }
+  ],
+  "aligned_pairs": {
+    "song1_1_vs_3": {
+      "constant_delay_frames_a_vs_b": 1,
+      "constant_delay_ms": 0.020833333333333332,
+      "best_constant_gain_b_to_a_db": -1.7426560618787184,
+      "correlation_after_alignment": 0.8182144342558881,
+      "residual_rms_db_relative_to_a": -4.807955271919754,
+      "max_abs_residual": 0.7010083111312393,
+      "interpretation": "Signal change, not an audibility or distortion verdict."
+    },
+    "song1_2_vs_3": {
+      "constant_delay_frames_a_vs_b": 0,
+      "constant_delay_ms": 0.0,
+      "best_constant_gain_b_to_a_db": -0.07996464649030671,
+      "correlation_after_alignment": 0.9908363438673489,
+      "residual_rms_db_relative_to_a": -17.38878395524969,
+      "max_abs_residual": 0.3241503760637797,
+      "interpretation": "Signal change, not an audibility or distortion verdict."
+    },
+    "song2_1_vs_3": {
+      "constant_delay_frames_a_vs_b": 1,
+      "constant_delay_ms": 0.020833333333333332,
+      "best_constant_gain_b_to_a_db": -2.2844500381963813,
+      "correlation_after_alignment": 0.7687351263970515,
+      "residual_rms_db_relative_to_a": -3.8822757952006954,
+      "max_abs_residual": 0.7426553494449706,
+      "interpretation": "Signal change, not an audibility or distortion verdict."
+    },
+    "song2_2_vs_3": {
+      "constant_delay_frames_a_vs_b": 0,
+      "constant_delay_ms": 0.0,
+      "best_constant_gain_b_to_a_db": -0.11949332391071951,
+      "correlation_after_alignment": 0.9863370395027101,
+      "residual_rms_db_relative_to_a": -15.664016339565608,
+      "max_abs_residual": 0.29857254875356076,
+      "interpretation": "Signal change, not an audibility or distortion verdict."
+    }
+  },
+  "band_energy_deltas_db": {
+    "song1_3_vs_1": {
+      "20-80Hz": -1.3725209320538267,
+      "80-250Hz": -1.8632873555177052,
+      "250-1000Hz": 0.2564404077762862,
+      "1000-4000Hz": 4.575573432195485,
+      "4000-12000Hz": 1.4151626235367827,
+      "12000-20000Hz": 0.13130705450476238
+    },
+    "song2_3_vs_1": {
+      "20-80Hz": -1.9992133980564517,
+      "80-250Hz": -1.791037428056855,
+      "250-1000Hz": 0.1967538844919281,
+      "1000-4000Hz": 3.0265692525850945,
+      "4000-12000Hz": 0.8845866793064285,
+      "12000-20000Hz": 0.5077361001922476
+    }
+  },
+  "limits": [
+    "Old export renderer/settings manifest absent; filenames not pipeline proof.",
+    "RMS matched does not mean gated LUFS matched.",
+    "Song band energy is not headphone frequency response.",
+    "Gain-reduction >3dB percentages not independently reproduced.",
+    "No new subjective/device/installer acceptance."
+  ],
+  "installed_exe": {
+    "sha256": "aae2ff4e811d8c7e15a3e5699993a70c4fe53e18230e888fbbe2dbe7b922d95b",
+    "matching_modules": {
+      "aurora.core.constants": true,
+      "aurora.core.dynamics": true,
+      "aurora.core.spatial": true,
+      "aurora.core.hrtf": true,
+      "aurora.core.eq": true,
+      "aurora.audio.engine": true,
+      "aurora.core.reflections": true,
+      "aurora.core.dsp_graph": true,
+      "aurora.bridge.audiofx": true
+    },
+    "normalization": "co_filename only, recursively",
+    "limitation": "Does not establish all bundled resources or runtime device behavior."
+  },
+  "runtime_edges": {
+    "source_sha256": {
+      "src/aurora/audio/engine.py": "0d1f47b76045a31d39b9707badff8621eb86b8f913c5b32a669357b7de687f08",
+      "src/aurora/audio/analyzer.py": "575d59770daf1d8687f9675dffb3ee274b88913f0549663fe0cbb65bf4bbe675",
+      "src/aurora/core/dsp_graph.py": "78a5152a9ce78afd48842c278367fc252e23e29bd6a14cff28de43f3a4f0f95f",
+      "src/aurora/core/eq.py": "7e4e30d535f8d1e1ecb953501c460c36051eb28ff4a656138288757b52a0780e"
+    },
+    "device_open_attempts": 0,
+    "findings": {
+      "initial_gain_transient": {
+        "evidence": "VERIFIED_OFFLINE",
+        "references": [
+          "src/aurora/audio/engine.py:67",
+          "src/aurora/audio/engine.py:401"
+        ],
+        "cases": [
+          {
+            "configured_volume": 0.0,
+            "muted": false,
+            "target_gain": 0.0,
+            "output_peak": 1.0,
+            "first_stereo_frame": [
+              1.0,
+              0.9990224838256836
+            ],
+            "samples_above_target": 1023,
+            "bug_reproduced": true
+          },
+          {
+            "configured_volume": 1.0,
+            "muted": true,
+            "target_gain": 0.0,
+            "output_peak": 1.0,
+            "first_stereo_frame": [
+              1.0,
+              0.9990224838256836
+            ],
+            "samples_above_target": 1023,
+            "bug_reproduced": true
+          },
+          {
+            "configured_volume": 0.5778,
+            "muted": false,
+            "target_gain": 0.5778,
+            "output_peak": 1.0,
+            "first_stereo_frame": [
+              1.0,
+              0.9995872974395752
+            ],
+            "samples_above_target": 1023,
+            "bug_reproduced": true
+          }
+        ],
+        "scope": "Initial playback transient; not a demonstrated steady timbre cause."
+      },
+      "partial_exception_fallback": {
+        "evidence": "VERIFIED_OFFLINE",
+        "references": [
+          "src/aurora/core/dsp_graph.py:220"
+        ],
+        "input_peak": 0.75,
+        "output_peak": 1.5,
+        "degraded": true,
+        "reason": "RuntimeError: intentional offline reproduction",
+        "bug_reproduced": true,
+        "scope": "Injected processor failure; no evidence of an actual user-session failure."
+      },
+      "eq_flatten_interleaving": {
+        "evidence": "VERIFIED_FORCED_VALID_SCHEDULE",
+        "references": [
+          "src/aurora/core/eq.py:227",
+          "src/aurora/core/eq.py:262",
+          "src/aurora/core/eq.py:277"
+        ],
+        "degraded": true,
+        "reason": "TypeError: unsupported operand type(s) for *: 'complex' and 'NoneType'",
+        "bug_reproduced": true,
+        "scope": "Forced schedule; actual occurrence unverified; dormant with flat EQ."
+      },
+      "ring_cursor_interleaving": {
+        "evidence": "VERIFIED_FORCED_VALID_SCHEDULE",
+        "references": [
+          "src/aurora/audio/analyzer.py:84"
+        ],
+        "first_data": [
+          2.0,
+          3.0,
+          4.0,
+          5.0
+        ],
+        "first_cursor": 4,
+        "second_data": [
+          4.0,
+          5.0
+        ],
+        "second_cursor": 6,
+        "bug_reproduced": true,
+        "scope": "Analyzer measurements only; no direct PCM output mutation."
+      }
+    },
+    "interpretation": "Secondary defects only. These tests do not establish the cause of the user's steady muffled/thin/unnatural timbre."
+  },
+  "prior_local_artifact_sha256": {
+    "samples.json": "be637feff22bfdb9ddef6b798669194ed2d756639ba36ea415c2d5448f257aff",
+    "engine_repro.py": "3b6cae6d4b4c152117ba7de0c8cf433a8bfe799f8fb542c98c6bb575e7805f61",
+    "engine_repro.json": "32d95e9013328dc6c911deb3b50ecafa626db3d341436ea14946b2a38d3fbe25",
+    "installed_modules.json": "465cf9f336ecbceae9f0434124366760cdfbc4a7636a97a721a25e6021ecb373"
+  },
+  "context_preparation_check": {
+    "date": "2026-10-03",
+    "timezone": "Asia/Taipei",
+    "purpose": "Bounded R0 source-context check only; no FFmpeg, audio export, device playback or new product DSP.",
+    "tool_revision": "postroll-enabled v2; before global-hop grid fix",
+    "core_sha256": {
+      "src/aurora/core/constants.py": "6eabcf27b9327da7b8daa0d8e2ae618360a2566fb97809ab4164e48859786b23",
+      "src/aurora/core/dsp_graph.py": "78a5152a9ce78afd48842c278367fc252e23e29bd6a14cff28de43f3a4f0f95f",
+      "src/aurora/core/spatial.py": "1b51ba892c3bbb2d017a5287f85547df72aa01ed24cd5aedea5da0e7de9a09c4",
+      "src/aurora/core/reflections.py": "124db77e2f891b5bdb4c3748ec8e9b2086429d7bb00310b7385e66506a56360c",
+      "src/aurora/core/dynamics.py": "42b5d6963a9dd7e67ab885308b12078d218bcf9977c590d8e83756bf300c4d2c",
+      "src/aurora/core/hrtf.py": "1b03d71c0153f57176fbf36378ff3b999d6bf832e5f1601bb1d184700bb68347",
+      "src/aurora/core/rates.py": "9d052a5dd2faebfb60e3673568a9a45cc29201550c19ba436a6891492a0b182a",
+      "src/aurora/core/paths.py": "4792e87a0bfd1dd205a764b8893a6cadbb2e312b6d9e9e7c1be64b5f28b2b03c",
+      "tools/probe_naturalness.py": "42d9fc617848873a2ec3fed04f94a4a47d4f567a51bdb8482f7913ebe8bd8729"
+    },
+    "runtime": {
+      "python": "3.11.16",
+      "numpy": "2.4.6",
+      "miniaudio": "1.71"
+    },
+    "method": {
+      "arm": "current_full_100",
+      "profile": "synthetic",
+      "processing_rate_hz": 48000,
+      "block_frames": 2880,
+      "common_input_attenuation_db": -12.0,
+      "requested_segment_seconds": 20.0,
+      "real_postroll_seconds": 2.0,
+      "candidate_preroll_seconds": [
+        2.0,
+        4.0
+      ],
+      "full_reference": "decode and render from source frame 0 through segment end plus 2 s real postroll; crop only requested 20 s after declared latency compensation",
+      "aligned_candidates": "use full-from-0 decoded PCM starting at floor(context_start / hop) * hop, retaining same segment end and 2 s real postroll",
+      "scaled_fft_frames": 2048,
+      "scaled_hop_frames": 1024,
+      "absolute_difference_tolerance": 2e-07,
+      "difference_rms_definition": "20*log10(RMS(candidate-reference)/RMS(reference)); identical PCM represented as null dB",
+      "pcm_seek_check": "Compare entire decoded preroll+segment+postroll from MP3 seek against identical frame span decoded from source 0. Both pairs exact, therefore requested 20 s also exact."
+    },
+    "songs": [
+      {
+        "song": "Paperman",
+        "source_sha256": "a45bec50b59d405eec48fd1898b2244f19b918f8682d329227b6453eaddc4b50",
+        "source_segment_start_frame": 4320000,
+        "source_segment_end_frame": 5280000,
+        "full_reference_input_frames": 5376000,
+        "contexts": [
+          {
+            "requested_preroll_seconds": 2.0,
+            "unaligned_context_start_frame": 4224000,
+            "unaligned_context_start_mod_hop": 0,
+            "floor_hop_aligned_context_start_frame": 4224000,
+            "aligned_actual_preroll_seconds": 2.0,
+            "seek_pcm_bit_identical_to_from0": true,
+            "seek_pcm_max_abs_difference": 0.0,
+            "unaligned_render_vs_full_reference": {
+              "maximum_absolute_pcm_difference": 1.1920928955078125e-07,
+              "difference_rms_db_relative_to_comparison_reference": -152.1346572487489,
+              "frames_above_absolute_tolerance": 0,
+              "total_segment_frames": 960000,
+              "fraction_segment_frames_above_absolute_tolerance": 0.0
+            },
+            "aligned_render_vs_full_reference": {
+              "maximum_absolute_pcm_difference": 1.1920928955078125e-07,
+              "difference_rms_db_relative_to_comparison_reference": -152.1346572487489,
+              "frames_above_absolute_tolerance": 0,
+              "total_segment_frames": 960000,
+              "fraction_segment_frames_above_absolute_tolerance": 0.0
+            }
+          },
+          {
+            "requested_preroll_seconds": 4.0,
+            "unaligned_context_start_frame": 4128000,
+            "unaligned_context_start_mod_hop": 256,
+            "floor_hop_aligned_context_start_frame": 4127744,
+            "aligned_actual_preroll_seconds": 4.005333333333334,
+            "seek_pcm_bit_identical_to_from0": true,
+            "seek_pcm_max_abs_difference": 0.0,
+            "unaligned_render_vs_full_reference": {
+              "maximum_absolute_pcm_difference": 0.04051792249083519,
+              "difference_rms_db_relative_to_comparison_reference": -24.85143518783609,
+              "frames_above_absolute_tolerance": 960000,
+              "total_segment_frames": 960000,
+              "fraction_segment_frames_above_absolute_tolerance": 1.0
+            },
+            "aligned_render_vs_full_reference": {
+              "maximum_absolute_pcm_difference": 0.0,
+              "difference_rms_db_relative_to_comparison_reference": null,
+              "frames_above_absolute_tolerance": 0,
+              "total_segment_frames": 960000,
+              "fraction_segment_frames_above_absolute_tolerance": 0.0
+            }
+          }
+        ],
+        "unaligned_2s_vs_4s": {
+          "maximum_absolute_pcm_difference": 0.04051792249083519,
+          "difference_rms_db_relative_to_comparison_reference": -24.84808917827231,
+          "frames_above_absolute_tolerance": 960000,
+          "total_segment_frames": 960000,
+          "fraction_segment_frames_above_absolute_tolerance": 1.0
+        },
+        "aligned_2s_vs_4s": {
+          "maximum_absolute_pcm_difference": 1.1920928955078125e-07,
+          "difference_rms_db_relative_to_comparison_reference": -152.1346572487489,
+          "frames_above_absolute_tolerance": 0,
+          "total_segment_frames": 960000,
+          "fraction_segment_frames_above_absolute_tolerance": 0.0
+        }
+      },
+      {
+        "song": "Castorice",
+        "source_sha256": "93b397b9483edf117877e9d4f82d38fea29d8d485665dccfb31affdbb0f47562",
+        "source_segment_start_frame": 4368000,
+        "source_segment_end_frame": 5328000,
+        "full_reference_input_frames": 5424000,
+        "contexts": [
+          {
+            "requested_preroll_seconds": 2.0,
+            "unaligned_context_start_frame": 4272000,
+            "unaligned_context_start_mod_hop": 896,
+            "floor_hop_aligned_context_start_frame": 4271104,
+            "aligned_actual_preroll_seconds": 2.018666666666667,
+            "seek_pcm_bit_identical_to_from0": true,
+            "seek_pcm_max_abs_difference": 0.0,
+            "unaligned_render_vs_full_reference": {
+              "maximum_absolute_pcm_difference": 0.031853869557380676,
+              "difference_rms_db_relative_to_comparison_reference": -28.121721141706683,
+              "frames_above_absolute_tolerance": 960000,
+              "total_segment_frames": 960000,
+              "fraction_segment_frames_above_absolute_tolerance": 1.0
+            },
+            "aligned_render_vs_full_reference": {
+              "maximum_absolute_pcm_difference": 7.450580596923828e-08,
+              "difference_rms_db_relative_to_comparison_reference": -156.7004958305398,
+              "frames_above_absolute_tolerance": 0,
+              "total_segment_frames": 960000,
+              "fraction_segment_frames_above_absolute_tolerance": 0.0
+            }
+          },
+          {
+            "requested_preroll_seconds": 4.0,
+            "unaligned_context_start_frame": 4176000,
+            "unaligned_context_start_mod_hop": 128,
+            "floor_hop_aligned_context_start_frame": 4175872,
+            "aligned_actual_preroll_seconds": 4.002666666666666,
+            "seek_pcm_bit_identical_to_from0": true,
+            "seek_pcm_max_abs_difference": 0.0,
+            "unaligned_render_vs_full_reference": {
+              "maximum_absolute_pcm_difference": 0.027391433715820312,
+              "difference_rms_db_relative_to_comparison_reference": -28.141231520557444,
+              "frames_above_absolute_tolerance": 960000,
+              "total_segment_frames": 960000,
+              "fraction_segment_frames_above_absolute_tolerance": 1.0
+            },
+            "aligned_render_vs_full_reference": {
+              "maximum_absolute_pcm_difference": 1.862645149230957e-09,
+              "difference_rms_db_relative_to_comparison_reference": -216.56868460236558,
+              "frames_above_absolute_tolerance": 0,
+              "total_segment_frames": 960000,
+              "fraction_segment_frames_above_absolute_tolerance": 0.0
+            }
+          }
+        ],
+        "unaligned_2s_vs_4s": {
+          "maximum_absolute_pcm_difference": 0.04949425160884857,
+          "difference_rms_db_relative_to_comparison_reference": -23.284004110319493,
+          "frames_above_absolute_tolerance": 960000,
+          "total_segment_frames": 960000,
+          "fraction_segment_frames_above_absolute_tolerance": 1.0
+        },
+        "aligned_2s_vs_4s": {
+          "maximum_absolute_pcm_difference": 7.450580596923828e-08,
+          "difference_rms_db_relative_to_comparison_reference": -156.70050030731883,
+          "frames_above_absolute_tolerance": 0,
+          "total_segment_frames": 960000,
+          "fraction_segment_frames_above_absolute_tolerance": 0.0
+        }
+      }
+    ],
+    "conclusion": "Arbitrary context starts reset the STFT hop grid and materially alter all 20 s. Floor context start to the scaled global hop grid. For these two songs, aligned 2 s and aligned 4 s prerolls converge with full-from-0 reference below the 2e-7 absolute tolerance. MP3 seeking did not cause the difference.",
+    "limits": [
+      "These comparisons validate only current_full_100 synthetic at 48 kHz and common -12 dB input on these two segments.",
+      "No LUFS, listening, device, installed-build or release acceptance performed.",
+      "No output PCM persisted.",
+      "The aligned candidate used already decoded full-source PCM; the forthcoming decoder grid fix requires its own regression."
+    ],
+    "local_artifact_sha256": "a8029425ec22234ccf69bccd2c2ec4d73551ba34c652c3360a5c402f57b0403b"
+  },
+  "offline_helper_finding": {
+    "function": "aurora.audio.engine.decode_all",
+    "issue": "Additional next() after miniaudio.stream_file already primes decoder; discards 4096 frames at decoder block size4096.",
+    "status": "FIX_PENDING_IN_HELPER; new probe avoids it with regression",
+    "live_playback": "Uses separate correct decoder path; no same finding."
+  },
+  "final_renderer_preparation": {
+    "status": "VERIFIED_OFFLINE",
+    "claim": "Controlled limiter-inactive test preparation only; subjective, device and release acceptance NOT_RUN.",
+    "songs": [
+      {
+        "processing_rate": 48000,
+        "channels": 2,
+        "source_sha256": "a45bec50b59d405eec48fd1898b2244f19b918f8682d329227b6453eaddc4b50",
+        "source_start_frame": 4320000,
+        "source_end_frame": 5280000,
+        "segment_frames": 960000,
+        "decode_start_frame": 4224000,
+        "context_grid_frames": 1024,
+        "alignment_extra_preroll_frames": 0,
+        "real_preroll_seconds": 2.0,
+        "real_postroll_seconds": 2.0,
+        "shortened_postroll_at_source_eof": false,
+        "common_input_attenuation_db": -12.0,
+        "target_lufs": -18.73,
+        "delivered_pairwise_lufs_spread": 0.00999999999999801,
+        "profile": {
+          "requested": "synthetic",
+          "effective": "synthetic",
+          "sha256": null
+        },
+        "core_sha256": {
+          "src/aurora/core/constants.py": "6eabcf27b9327da7b8daa0d8e2ae618360a2566fb97809ab4164e48859786b23",
+          "src/aurora/core/dsp_graph.py": "78a5152a9ce78afd48842c278367fc252e23e29bd6a14cff28de43f3a4f0f95f",
+          "src/aurora/core/spatial.py": "1b51ba892c3bbb2d017a5287f85547df72aa01ed24cd5aedea5da0e7de9a09c4",
+          "src/aurora/core/reflections.py": "124db77e2f891b5bdb4c3748ec8e9b2086429d7bb00310b7385e66506a56360c",
+          "src/aurora/core/dynamics.py": "42b5d6963a9dd7e67ab885308b12078d218bcf9977c590d8e83756bf300c4d2c",
+          "src/aurora/core/hrtf.py": "1b03d71c0153f57176fbf36378ff3b999d6bf832e5f1601bb1d184700bb68347",
+          "src/aurora/core/rates.py": "9d052a5dd2faebfb60e3673568a9a45cc29201550c19ba436a6891492a0b182a",
+          "src/aurora/core/paths.py": "4792e87a0bfd1dd205a764b8893a6cadbb2e312b6d9e9e7c1be64b5f28b2b03c",
+          "tools/probe_naturalness.py": "3ac99a983a8dade5d79e74b5b9ab3fc0edf0c817ab945ce9903dac6c3a12d4e9"
+        },
+        "source_segment_levels": {
+          "integrated_lufs": -6.63,
+          "true_peak_dbtp": 0.81,
+          "sample_peak_dbfs": 0.0,
+          "rms_dbfs": -8.43071677198488
+        },
+        "randomization_seed": 20261003,
+        "song": "Paperman",
+        "local_report": "dist/naturalness-baseline-2026-10-03/paperman/diagnostics.json",
+        "report_sha256": "3676bd01999660667f0af0ebd77371de5d2611965fd825219a56758757483af4",
+        "arms": [
+          {
+            "arm": {
+              "name": "reflections_only_100",
+              "spatial_amount": 0.0,
+              "reflection_amount": 1.0,
+              "depth_db": -6.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_01.wav",
+            "sample_sha256": "a206ce9706016305454d5c52d7ef217400636237d45a529a99e5747cc729b87d",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.54,
+              "true_peak_dbtp": -10.53,
+              "sample_peak_dbfs": -10.657272021919177,
+              "rms_dbfs": -20.37108766138127
+            },
+            "fixed_export_attenuation_db": -0.19000000000000128,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.73,
+              "true_peak_dbtp": -10.72,
+              "sample_peak_dbfs": -10.847271850809923,
+              "rms_dbfs": -20.561087458421294
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 576
+          },
+          {
+            "arm": {
+              "name": "spatial_100_without_reflections",
+              "spatial_amount": 1.0,
+              "reflection_amount": 0.0,
+              "depth_db": -6.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_02.wav",
+            "sample_sha256": "1253fe36394850e3694704ebf21f556199cc610bb76f2e11db801a1ca3c820ce",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.19,
+              "true_peak_dbtp": -6.91,
+              "sample_peak_dbfs": -7.059295751022214,
+              "rms_dbfs": -20.843436775087344
+            },
+            "fixed_export_attenuation_db": -0.5399999999999991,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.74,
+              "true_peak_dbtp": -7.45,
+              "sample_peak_dbfs": -7.599296715811864,
+              "rms_dbfs": -21.383436756422306
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 2624
+          },
+          {
+            "arm": {
+              "name": "current_full_75",
+              "spatial_amount": 0.75,
+              "reflection_amount": 0.75,
+              "depth_db": -6.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_03.wav",
+            "sample_sha256": "e9a78f991c56620b2afe101e350f39237796c1327d5ce66c0d4e7ef0949e2e35",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.41,
+              "true_peak_dbtp": -8.2,
+              "sample_peak_dbfs": -8.337157667303787,
+              "rms_dbfs": -20.590166091834156
+            },
+            "fixed_export_attenuation_db": -0.3200000000000003,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.73,
+              "true_peak_dbtp": -8.52,
+              "sample_peak_dbfs": -8.657158967442586,
+              "rms_dbfs": -20.91016593235624
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 2624
+          },
+          {
+            "arm": {
+              "name": "full_100_no_depth",
+              "spatial_amount": 1.0,
+              "reflection_amount": 1.0,
+              "depth_db": 0.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_04.wav",
+            "sample_sha256": "568e388191f45542f92b31eee3ddd146ee3d99ff1099537c4d78fbf9c03570ca",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.51,
+              "true_peak_dbtp": -8.35,
+              "sample_peak_dbfs": -8.352963187943892,
+              "rms_dbfs": -20.4752487815372
+            },
+            "fixed_export_attenuation_db": -0.21999999999999886,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.73,
+              "true_peak_dbtp": -8.57,
+              "sample_peak_dbfs": -8.57296272963615,
+              "rms_dbfs": -20.69524865078092
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 2624
+          },
+          {
+            "arm": {
+              "name": "current_full_55",
+              "spatial_amount": 0.55,
+              "reflection_amount": 0.55,
+              "depth_db": -6.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_05.wav",
+            "sample_sha256": "69d20c17842c2fa6e24c1794fdbd2b25276fc7c11719ab31b58917c94038fdc1",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.54,
+              "true_peak_dbtp": -9.13,
+              "sample_peak_dbfs": -9.144845771912504,
+              "rms_dbfs": -20.482347813173668
+            },
+            "fixed_export_attenuation_db": -0.19000000000000128,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.73,
+              "true_peak_dbtp": -9.32,
+              "sample_peak_dbfs": -9.334847255151967,
+              "rms_dbfs": -20.67234761221128
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 2624
+          },
+          {
+            "arm": {
+              "name": "current_full_60",
+              "spatial_amount": 0.6,
+              "reflection_amount": 0.6,
+              "depth_db": -6.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_06.wav",
+            "sample_sha256": "fdde7a5902e4f1392cd22d7ef8083aaaec430db6ab2a218b2fa5242cfe9b7f1a",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.52,
+              "true_peak_dbtp": -8.99,
+              "sample_peak_dbfs": -8.990669302194755,
+              "rms_dbfs": -20.50481447027552
+            },
+            "fixed_export_attenuation_db": -0.21000000000000085,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.73,
+              "true_peak_dbtp": -9.2,
+              "sample_peak_dbfs": -9.200670488852522,
+              "rms_dbfs": -20.714814464758472
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 2624
+          },
+          {
+            "arm": {
+              "name": "current_full_50",
+              "spatial_amount": 0.5,
+              "reflection_amount": 0.5,
+              "depth_db": -6.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_07.wav",
+            "sample_sha256": "1b983807148a021ce5b8f73b80f3fe2387a99377b3fd9d014a03252dcb513865",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.57,
+              "true_peak_dbtp": -9.3,
+              "sample_peak_dbfs": -9.320438243867615,
+              "rms_dbfs": -20.463126280996246
+            },
+            "fixed_export_attenuation_db": -0.16000000000000014,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.73,
+              "true_peak_dbtp": -9.46,
+              "sample_peak_dbfs": -9.480438679320004,
+              "rms_dbfs": -20.62312643553132
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 2624
+          },
+          {
+            "arm": {
+              "name": "current_full_100",
+              "spatial_amount": 1.0,
+              "reflection_amount": 1.0,
+              "depth_db": -6.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_08.wav",
+            "sample_sha256": "470a9f8384898a850ab192ccec1416b38d61088b451b1097601795a30abb904c",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.09,
+              "true_peak_dbtp": -6.82,
+              "sample_peak_dbfs": -6.934253874433754,
+              "rms_dbfs": -20.758613007184074
+            },
+            "fixed_export_attenuation_db": -0.6400000000000006,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.73,
+              "true_peak_dbtp": -7.46,
+              "sample_peak_dbfs": -7.57425549960601,
+              "rms_dbfs": -21.398612854286796
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 2624
+          },
+          {
+            "arm": {
+              "name": "full_100_half_reflections",
+              "spatial_amount": 1.0,
+              "reflection_amount": 1.0,
+              "depth_db": -6.0,
+              "reflection_scale": 0.5
+            },
+            "sample_file": "sample_09.wav",
+            "sample_sha256": "fbd075b69c2df9c6c5d4fe9c1096b243e8a4901dbe3ed8e9689dcedc7a1ba633",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.16,
+              "true_peak_dbtp": -6.87,
+              "sample_peak_dbfs": -6.996549802157116,
+              "rms_dbfs": -20.818984842267593
+            },
+            "fixed_export_attenuation_db": -0.5700000000000003,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.74,
+              "true_peak_dbtp": -7.44,
+              "sample_peak_dbfs": -7.566552069083694,
+              "rms_dbfs": -21.3889849891795
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 2624
+          },
+          {
+            "arm": {
+              "name": "dry",
+              "spatial_amount": 0.0,
+              "reflection_amount": 0.0,
+              "depth_db": -6.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_10.wav",
+            "sample_sha256": "30ce3f62a8c41ccff132a7b3bfd4fd256b08274eb5cda9699e2535a635c45818",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.63,
+              "true_peak_dbtp": -11.19,
+              "sample_peak_dbfs": -12.000000253286988,
+              "rms_dbfs": -20.43071702187458
+            },
+            "fixed_export_attenuation_db": -0.10000000000000142,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.73,
+              "true_peak_dbtp": -11.29,
+              "sample_peak_dbfs": -12.100000096802813,
+              "rms_dbfs": -20.53071694390546
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 0
+          }
+        ]
+      },
+      {
+        "processing_rate": 48000,
+        "channels": 2,
+        "source_sha256": "93b397b9483edf117877e9d4f82d38fea29d8d485665dccfb31affdbb0f47562",
+        "source_start_frame": 4368000,
+        "source_end_frame": 5328000,
+        "segment_frames": 960000,
+        "decode_start_frame": 4271104,
+        "context_grid_frames": 1024,
+        "alignment_extra_preroll_frames": 896,
+        "real_preroll_seconds": 2.018666666666667,
+        "real_postroll_seconds": 2.0,
+        "shortened_postroll_at_source_eof": false,
+        "common_input_attenuation_db": -12.0,
+        "target_lufs": -18.57,
+        "delivered_pairwise_lufs_spread": 0.00999999999999801,
+        "profile": {
+          "requested": "synthetic",
+          "effective": "synthetic",
+          "sha256": null
+        },
+        "core_sha256": {
+          "src/aurora/core/constants.py": "6eabcf27b9327da7b8daa0d8e2ae618360a2566fb97809ab4164e48859786b23",
+          "src/aurora/core/dsp_graph.py": "78a5152a9ce78afd48842c278367fc252e23e29bd6a14cff28de43f3a4f0f95f",
+          "src/aurora/core/spatial.py": "1b51ba892c3bbb2d017a5287f85547df72aa01ed24cd5aedea5da0e7de9a09c4",
+          "src/aurora/core/reflections.py": "124db77e2f891b5bdb4c3748ec8e9b2086429d7bb00310b7385e66506a56360c",
+          "src/aurora/core/dynamics.py": "42b5d6963a9dd7e67ab885308b12078d218bcf9977c590d8e83756bf300c4d2c",
+          "src/aurora/core/hrtf.py": "1b03d71c0153f57176fbf36378ff3b999d6bf832e5f1601bb1d184700bb68347",
+          "src/aurora/core/rates.py": "9d052a5dd2faebfb60e3673568a9a45cc29201550c19ba436a6891492a0b182a",
+          "src/aurora/core/paths.py": "4792e87a0bfd1dd205a764b8893a6cadbb2e312b6d9e9e7c1be64b5f28b2b03c",
+          "tools/probe_naturalness.py": "3ac99a983a8dade5d79e74b5b9ab3fc0edf0c817ab945ce9903dac6c3a12d4e9"
+        },
+        "source_segment_levels": {
+          "integrated_lufs": -6.47,
+          "true_peak_dbtp": 0.37,
+          "sample_peak_dbfs": 0.0,
+          "rms_dbfs": -8.718427365146528
+        },
+        "randomization_seed": 20261004,
+        "song": "Castorice",
+        "local_report": "dist/naturalness-baseline-2026-10-03/castorice/diagnostics.json",
+        "report_sha256": "7c81035b540164afe8cf43a74466fb322a6fef2d2c5e1908fa477f26e5f5f804",
+        "arms": [
+          {
+            "arm": {
+              "name": "spatial_100_without_reflections",
+              "spatial_amount": 1.0,
+              "reflection_amount": 0.0,
+              "depth_db": -6.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_01.wav",
+            "sample_sha256": "59958a54f1bc115cdffdd27ed5ab7dec6b110b3d2111760bd884f4ce693ae504",
+            "raw_segment_levels": {
+              "integrated_lufs": -17.76,
+              "true_peak_dbtp": -7.1,
+              "sample_peak_dbfs": -7.163441756601822,
+              "rms_dbfs": -20.93784036872261
+            },
+            "fixed_export_attenuation_db": -0.8099999999999987,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.57,
+              "true_peak_dbtp": -7.91,
+              "sample_peak_dbfs": -7.973443777400362,
+              "rms_dbfs": -21.747840395630014
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 2624
+          },
+          {
+            "arm": {
+              "name": "full_100_no_depth",
+              "spatial_amount": 1.0,
+              "reflection_amount": 1.0,
+              "depth_db": 0.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_02.wav",
+            "sample_sha256": "b4d5b2d8c9bef290d7ec92952d04c13e8de9b9492184b8a8abd45a924064f619",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.28,
+              "true_peak_dbtp": -6.99,
+              "sample_peak_dbfs": -7.025762369981344,
+              "rms_dbfs": -20.719142346613488
+            },
+            "fixed_export_attenuation_db": -0.28999999999999915,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.57,
+              "true_peak_dbtp": -7.28,
+              "sample_peak_dbfs": -7.3157632578573715,
+              "rms_dbfs": -21.009142207649937
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 2624
+          },
+          {
+            "arm": {
+              "name": "current_full_100",
+              "spatial_amount": 1.0,
+              "reflection_amount": 1.0,
+              "depth_db": -6.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_03.wav",
+            "sample_sha256": "fd92ae58ef4d6a940e00f508635aea714295412f50e0d058544ac2e74c0daffd",
+            "raw_segment_levels": {
+              "integrated_lufs": -17.66,
+              "true_peak_dbtp": -7.05,
+              "sample_peak_dbfs": -7.1523564573689855,
+              "rms_dbfs": -20.861725162099937
+            },
+            "fixed_export_attenuation_db": -0.9100000000000001,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.58,
+              "true_peak_dbtp": -7.96,
+              "sample_peak_dbfs": -8.06235891059215,
+              "rms_dbfs": -21.7717254204133
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 2624
+          },
+          {
+            "arm": {
+              "name": "current_full_50",
+              "spatial_amount": 0.5,
+              "reflection_amount": 0.5,
+              "depth_db": -6.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_04.wav",
+            "sample_sha256": "05834e28d3d660c023b172b1e2c1c4fa9f708f069734e628b43ebac332d2ebe8",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.34,
+              "true_peak_dbtp": -8.73,
+              "sample_peak_dbfs": -8.826787126693358,
+              "rms_dbfs": -20.715446800914577
+            },
+            "fixed_export_attenuation_db": -0.23000000000000043,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.57,
+              "true_peak_dbtp": -8.96,
+              "sample_peak_dbfs": -9.056789139322492,
+              "rms_dbfs": -20.945446898020478
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 2624
+          },
+          {
+            "arm": {
+              "name": "reflections_only_100",
+              "spatial_amount": 0.0,
+              "reflection_amount": 1.0,
+              "depth_db": -6.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_05.wav",
+            "sample_sha256": "4c9bd8292cea75020f24c3c665b6f7190d54b3d6b042dfbea3250183198bac9e",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.36,
+              "true_peak_dbtp": -10.1,
+              "sample_peak_dbfs": -10.142405671304859,
+              "rms_dbfs": -20.648355636856742
+            },
+            "fixed_export_attenuation_db": -0.21000000000000085,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.57,
+              "true_peak_dbtp": -10.31,
+              "sample_peak_dbfs": -10.352407506176728,
+              "rms_dbfs": -20.858355629012806
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 576
+          },
+          {
+            "arm": {
+              "name": "full_100_half_reflections",
+              "spatial_amount": 1.0,
+              "reflection_amount": 1.0,
+              "depth_db": -6.0,
+              "reflection_scale": 0.5
+            },
+            "sample_file": "sample_06.wav",
+            "sample_sha256": "528f7d6de6a3be75f6c94b73a66662b22b179af3c735521a0ff22c116318f99a",
+            "raw_segment_levels": {
+              "integrated_lufs": -17.73,
+              "true_peak_dbtp": -7.07,
+              "sample_peak_dbfs": -7.157897338544635,
+              "rms_dbfs": -20.919293780558966
+            },
+            "fixed_export_attenuation_db": -0.8399999999999999,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.58,
+              "true_peak_dbtp": -7.91,
+              "sample_peak_dbfs": -7.997898712331375,
+              "rms_dbfs": -21.75929384755453
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 2624
+          },
+          {
+            "arm": {
+              "name": "current_full_60",
+              "spatial_amount": 0.6,
+              "reflection_amount": 0.6,
+              "depth_db": -6.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_07.wav",
+            "sample_sha256": "d300bcd8d27866caab907c65b394294844483348ddb87b798277a63bcf09b2ca",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.25,
+              "true_peak_dbtp": -8.24,
+              "sample_peak_dbfs": -8.287152263923433,
+              "rms_dbfs": -20.729842494110066
+            },
+            "fixed_export_attenuation_db": -0.3200000000000003,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.57,
+              "true_peak_dbtp": -8.56,
+              "sample_peak_dbfs": -8.607152493393501,
+              "rms_dbfs": -21.049842342391763
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 2624
+          },
+          {
+            "arm": {
+              "name": "current_full_75",
+              "spatial_amount": 0.75,
+              "reflection_amount": 0.75,
+              "depth_db": -6.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_08.wav",
+            "sample_sha256": "9edae8ccc1c72787cc6b47fed8dc77c6ca075e8f80b9016b79fcb40dc4442fa3",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.06,
+              "true_peak_dbtp": -7.71,
+              "sample_peak_dbfs": -7.713474989028542,
+              "rms_dbfs": -20.766189041805788
+            },
+            "fixed_export_attenuation_db": -0.5100000000000016,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.57,
+              "true_peak_dbtp": -8.22,
+              "sample_peak_dbfs": -8.223474647528402,
+              "rms_dbfs": -21.276188892676586
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 2624
+          },
+          {
+            "arm": {
+              "name": "dry",
+              "spatial_amount": 0.0,
+              "reflection_amount": 0.0,
+              "depth_db": -6.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_09.wav",
+            "sample_sha256": "771bccbe72017ec3aca3d5bc6610a49a5e881a93213a7141b4ce35e9b025d590",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.47,
+              "true_peak_dbtp": -11.63,
+              "sample_peak_dbfs": -12.000000253286988,
+              "rms_dbfs": -20.718427615126448
+            },
+            "fixed_export_attenuation_db": -0.10000000000000142,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.57,
+              "true_peak_dbtp": -11.73,
+              "sample_peak_dbfs": -12.100000096802813,
+              "rms_dbfs": -20.818427530248506
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 0
+          },
+          {
+            "arm": {
+              "name": "current_full_55",
+              "spatial_amount": 0.55,
+              "reflection_amount": 0.55,
+              "depth_db": -6.0,
+              "reflection_scale": 1.0
+            },
+            "sample_file": "sample_10.wav",
+            "sample_sha256": "f1bd0e6512ab58c1353324a4c56f9c21682049a6ae26a216dee2fce8a9eba87d",
+            "raw_segment_levels": {
+              "integrated_lufs": -18.3,
+              "true_peak_dbtp": -8.48,
+              "sample_peak_dbfs": -8.54170114322574,
+              "rms_dbfs": -20.721722767407545
+            },
+            "fixed_export_attenuation_db": -0.2699999999999996,
+            "delivered_wav_levels": {
+              "integrated_lufs": -18.57,
+              "true_peak_dbtp": -8.75,
+              "sample_peak_dbfs": -8.811701756920197,
+              "rms_dbfs": -20.99172291039947
+            },
+            "minimum_limiter_gain": 1.0,
+            "limiter_reduced_frames_including_context_tail": 0,
+            "latency_frames": 2624
+          }
+        ]
+      }
+    ]
+  }
+}
