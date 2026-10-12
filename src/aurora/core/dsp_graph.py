@@ -7,7 +7,7 @@ EQ、Spatial、Limiter 之後都掛在這裡。先把契約定死，是因為回
 錯誤代價特別高：一個沒接住的例外會讓 miniaudio 的產生器結束，播放停在
 那裡，而 UI 完全不知道發生什麼事 —— 使用者只看到「播放器不動了」。
 
-## 五條規則
+## 六條規則
 
 1. :meth:`AudioProcessor.process` 一律 **in-place**，不回傳新陣列。
 2. ``process()`` **不得產生可避免的穩態配置**。工作 buffer 在
@@ -16,9 +16,10 @@ EQ、Spatial、Limiter 之後都掛在這裡。先把契約定死，是因為回
    去追那些是浪費時間。真正要擋的是「每次回呼都新建一批 ndarray／
    FFT workspace／filter buffer」。
 3. latency 由各處理器自行申報，:class:`DspGraph` 負責加總。
-4. 任何例外 → 整個 graph **永久**降級為 bypass。不可每次回呼重試，
-   否則每 60 ms 拋一次例外比原本的問題更糟。
-5. bypass 時 samples **完全不被觸碰** —— Hard Bypass 必須 bit-identical。
+4. 任何例外 → 整個 graph **永久**降級為 bypass。stage 在預先配置的工作區
+   處理；只有整條成功才提交回呼 buffer，失敗不會洩漏部分結果。
+5. 不可每次回呼重試壞掉的 stage，否則每 60 ms 拋一次例外比原本的問題更糟。
+6. bypass 時 samples **完全不被觸碰** —— Hard Bypass 必須 bit-identical。
 
 ## 執行緒
 
@@ -48,16 +49,15 @@ FloatArray = npt.NDArray[np.float32]
 class AudioProcessor(Protocol):
     """掛在回呼上的一級處理。
 
-    實作時把上面那五條規則當硬性要求，不是建議 —— 違反其中任何一條，
+    實作時把上面那六條規則當硬性要求，不是建議 —— 違反其中任何一條，
     症狀都會是難以重現的爆音或斷續，而不是乾脆的錯誤。
     """
 
     def prepare(self, sample_rate: int, channels: int, max_frames: int) -> None:
         """在主執行緒上配置資源。取樣率或裝置變更時會再呼叫一次。
 
-        ``max_frames`` 是**預期**的單次回呼上限，用來預先配置工作 buffer。
-        它是提示不是保證：實際回呼可能更大（例如離線推進），處理器要嘛
-        自己撐住，要嘛拋例外讓 graph 降級 —— 但不可以靜靜地算錯。
+        ``max_frames`` 是 graph 工作區的單次回呼上限。較大的輸入不會呼叫
+        處理器，而是保持原樣並讓 graph 降級；不可在回呼裡擴充工作區。
         """
         ...
 
@@ -89,6 +89,7 @@ class DspGraph:
         self._reason: str | None = None
         self._pending_reason: str | None = None
         self._config: tuple[int, int, int] | None = None
+        self._workspace: FloatArray | None = None
         # 每一級最後一次是用哪組參數 prepare 的。以 id 為鍵並同時留住物件本身，
         # 避免處理器被回收後 id 被別的物件重用而誤判成「已經 prepare 過」。
         # 不用 WeakKeyDictionary：dataclass 之類的處理器可能不可雜湊。
@@ -111,7 +112,7 @@ class DspGraph:
 
     @property
     def degraded(self) -> bool:
-        """是否因為例外而被永久停用。"""
+        """是否因處理錯誤或輸入超出準備契約而永久停用。"""
         return self._degraded
 
     @property
@@ -179,6 +180,7 @@ class DspGraph:
         prepare 會重新配置工作 buffer，不能與 ``process`` 同時發生。
         """
         self._config = (sample_rate, channels, max_frames)
+        self._workspace = np.empty(max_frames * channels, dtype=np.float32)
         for stage in self._stages:
             self._prepare_stage(stage, self._config)
 
@@ -196,7 +198,15 @@ class DspGraph:
             stage.reset()
 
     def clear_degradation(self) -> None:
-        """解除降級，讓級聯重新啟用。只有在真的修好之後才該呼叫。"""
+        """重設所有級的歷史後解除降級。
+
+        只能在音訊 callback 已停止、故障處理器已修復或換新後呼叫。單純清旗標
+        會讓失敗前已推進一半的處理器歷史被重新使用，造成不連續或錯誤輸出。
+        """
+        if not self._degraded:
+            return
+        for stage in self._stages:
+            stage.reset()
         self._degraded = False
         self._reason = None
         self._pending_reason = None
@@ -206,8 +216,8 @@ class DspGraph:
     def process(self, buf: FloatArray) -> None:
         """就地跑完整條級聯。**這個方法永遠不會拋例外。**
 
-        任何一級出錯就整條永久停用並記下原因，這一次回呼的 samples 維持
-        原樣送出去 —— 使用者會聽到未處理的音訊，而不是一片寂靜。
+        先把輸入複製到 prepare 時配置的工作區。只有所有 stage 成功才提交回
+        呼 buffer；任何一級出錯或容量不足都保持原樣送出並永久降級。
         """
         if self._bypass or self._degraded:
             return
@@ -215,13 +225,40 @@ class DspGraph:
         if not stages:
             return
 
+        if buf.size == 0:
+            return
+
+        workspace = self._workspace
+        if workspace is None:
+            self._mark_degraded("DSP graph has no prepared workspace")
+            return
+        if buf.size > workspace.size:
+            self._mark_degraded("DSP buffer exceeds prepared capacity")
+            return
+        if (
+            buf.dtype != np.float32
+            or buf.ndim != 1
+            or not buf.flags.c_contiguous
+            or not buf.flags.writeable
+        ):
+            self._mark_degraded("DSP input must be a writable contiguous float32 vector")
+            return
+
+        working = workspace[: buf.size]
         try:
+            np.copyto(working, buf)
             for stage in stages:
-                stage.process(buf)
+                stage.process(working)
         # 這裡故意攔下所有 Exception。整個模組存在的理由就是「不讓任何東西
         # 逃到回呼外面」—— 逃出去的下場是產生器結束、播放靜靜停住。
         except Exception as exc:
-            # 回呼執行緒不做 I/O，所以只記錄不列印。主執行緒會來取。
-            self._degraded = True
-            self._reason = f"{type(exc).__name__}: {exc}"
-            self._pending_reason = self._reason
+            self._mark_degraded(f"{type(exc).__name__}: {exc}")
+            return
+
+        np.copyto(buf, working)
+
+    def _mark_degraded(self, reason: str) -> None:
+        """記下回呼故障；先發布診斷資料，再讓其他執行緒看到降級旗標。"""
+        self._reason = reason
+        self._pending_reason = reason
+        self._degraded = True
