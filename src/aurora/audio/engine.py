@@ -66,6 +66,14 @@ class AudioEngine:
         self._volume = 1.0
         self._applied_volume = 1.0
         self._muted = False
+        self._volume_initialized = False
+        self._gain_target = 1.0
+        self._gain_ramp_remaining = 0
+        self._gain_ramp_step = 0.0
+        self._gain_ramp_indices = np.arange(1, VOLUME_RAMP_FRAMES + 1, dtype=np.float32)
+        self._gain_ramp_buffer = np.empty(
+            max(VOLUME_RAMP_FRAMES, self._max_callback_frames()), dtype=np.float32
+        )
 
         self.analyzer = Analyzer(self._sample_rate, self._channels)
         #: 回呼上的 DSP 級聯。預設是空的 —— 空 graph 等同 bypass，
@@ -177,6 +185,8 @@ class AudioEngine:
             # 濾波器係數、FFT 視窗、工作 buffer 全都跟取樣率綁定，
             # 換了取樣率就得讓每一級重新配置。
             self.graph.prepare(sample_rate, self._channels, self._max_callback_frames())
+            self._prepare_gain_ramp_buffer()
+            self._reset_volume_ramp()
 
             if self._path:
                 self._rebuild_stream(int(resume_at * sample_rate))
@@ -254,6 +264,7 @@ class AudioEngine:
         self._callback = callback
         self._frames_played = max(0, seek_frame)
         self._tail_overshoot = 0
+        self._reset_volume_ramp()
         return True
 
     def _flush_tail(
@@ -398,21 +409,75 @@ class AudioEngine:
         # 這一次的 samples 原樣通過。回呼絕不能因為 DSP 出錯而死掉。
         self.graph.process(samples)
 
-        gain = self._target_gain
-        if gain != 1.0 or self._applied_volume != gain:
-            samples *= self._gain_ramp(samples.size, gain)
-            self._applied_volume = gain
+        self._gain_ramp(samples, self._target_gain)
         return samples.tobytes()
 
-    def _gain_ramp(self, count: int, target: float) -> FloatArray:
-        """在區塊內把增益從上次的值平滑過渡到目標值，避免調音量時爆音。"""
-        start = self._applied_volume
-        if start == target:
-            return np.full(count, target, dtype=np.float32)
-        ramp_length = min(count, VOLUME_RAMP_FRAMES * self._channels)
-        ramp = np.full(count, target, dtype=np.float32)
-        ramp[:ramp_length] = np.linspace(start, target, ramp_length, dtype=np.float32)
-        return ramp
+    def _prepare_gain_ramp_buffer(self) -> None:
+        """在主執行緒預配音量斜坡，回呼只重用這段 frame-gain 工作區。"""
+        self._gain_ramp_buffer = np.empty(
+            max(VOLUME_RAMP_FRAMES, self._max_callback_frames()), dtype=np.float32
+        )
+
+    def _reset_volume_ramp(self) -> None:
+        """新串流從當前目標音量開始；暫停／續播不呼叫此方法。"""
+        target = self._target_gain
+        self._volume_initialized = False
+        self._applied_volume = target
+        self._gain_target = target
+        self._gain_ramp_remaining = 0
+        self._gain_ramp_step = 0.0
+
+    def _gain_ramp(self, samples: FloatArray, target: float) -> None:
+        """以每音框共用的增益平滑過渡；短 callback 會延續未完成的斜坡。"""
+        if not self._volume_initialized:
+            self._volume_initialized = True
+            self._applied_volume = target
+            self._gain_target = target
+            self._gain_ramp_remaining = 0
+            self._gain_ramp_step = 0.0
+            if target != 1.0:
+                samples *= target
+            return
+
+        if target != self._gain_target:
+            self._gain_target = target
+            if target == self._applied_volume:
+                self._gain_ramp_remaining = 0
+                self._gain_ramp_step = 0.0
+            else:
+                self._gain_ramp_remaining = VOLUME_RAMP_FRAMES
+                self._gain_ramp_step = (target - self._applied_volume) / VOLUME_RAMP_FRAMES
+
+        frames = samples.size // self._channels
+        if frames == 0:
+            return
+
+        if self._gain_ramp_remaining == 0:
+            if self._applied_volume != 1.0:
+                samples *= self._applied_volume
+            return
+
+        ramp_frames = min(frames, self._gain_ramp_remaining)
+        frame_samples = samples.reshape(-1, self._channels)
+        ramp = self._gain_ramp_buffer[:ramp_frames]
+        np.multiply(
+            self._gain_ramp_indices[:ramp_frames],
+            np.float32(self._gain_ramp_step),
+            out=ramp,
+        )
+        np.add(ramp, np.float32(self._applied_volume), out=ramp)
+        completes_ramp = ramp_frames == self._gain_ramp_remaining
+        if completes_ramp:
+            ramp[-1] = np.float32(self._gain_target)
+        frame_samples[:ramp_frames] *= ramp[:, np.newaxis]
+        self._applied_volume = float(ramp[-1])
+        self._gain_ramp_remaining -= ramp_frames
+
+        if completes_ramp:
+            self._applied_volume = self._gain_target
+            self._gain_ramp_step = 0.0
+        if frames > ramp_frames:
+            frame_samples[ramp_frames:] *= self._gain_target
 
     def _on_end(self) -> None:
         """解碼器耗盡。只設旗標，讓 UI 執行緒去處理換下一首。"""

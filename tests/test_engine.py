@@ -285,6 +285,119 @@ def test_volume_is_clamped() -> None:
         engine.close()
 
 
+def _process_pcm(engine: AudioEngine, samples: np.ndarray) -> np.ndarray:
+    return np.frombuffer(engine._process(samples.astype(np.float32).tobytes()), dtype=np.float32).reshape(
+        -1, 2
+    )
+
+
+def test_initial_volume_is_applied_immediately_with_shared_stereo_gain() -> None:
+    engine = AudioEngine(RATE)
+    try:
+        engine.volume = 0.5778
+        source = np.array([[0.5, 0.25], [-0.25, -0.5]], dtype=np.float32)
+
+        output = _process_pcm(engine, source)
+
+        np.testing.assert_allclose(output, source * 0.5778, rtol=0, atol=1e-7)
+    finally:
+        engine.close()
+
+
+def test_initial_mute_is_silent_from_the_first_sample() -> None:
+    engine = AudioEngine(RATE)
+    try:
+        engine.muted = True
+        source = np.ones((2, 2), dtype=np.float32)
+
+        output = _process_pcm(engine, source)
+
+        assert np.array_equal(output, np.zeros_like(source))
+    finally:
+        engine.close()
+
+
+def test_volume_ramp_uses_frame_gain_and_continues_across_short_callbacks() -> None:
+    engine = AudioEngine(RATE)
+    try:
+        source = np.ones((2, 2), dtype=np.float32)
+        assert np.array_equal(_process_pcm(engine, source), source)
+
+        engine.volume = 0.0
+        first = _process_pcm(engine, source)
+        second = _process_pcm(engine, source)
+
+        np.testing.assert_allclose(
+            first,
+            np.array([[511 / 512] * 2, [510 / 512] * 2], dtype=np.float32),
+            rtol=0,
+            atol=1e-7,
+        )
+        np.testing.assert_allclose(
+            second,
+            np.array([[509 / 512] * 2, [508 / 512] * 2], dtype=np.float32),
+            rtol=0,
+            atol=1e-7,
+        )
+    finally:
+        engine.close()
+
+
+def test_seek_starts_new_stream_at_the_current_target_gain(flac_path: Path) -> None:
+    engine = AudioEngine(RATE)
+    try:
+        engine.volume = 0.5
+        assert engine.load(str(flac_path))
+        source = np.ones((2, 2), dtype=np.float32)
+        _process_pcm(engine, source)
+
+        engine.volume = 0.75
+        _process_pcm(engine, source)
+        assert engine.seek(0.0)
+        engine.volume = 0.25
+
+        output = _process_pcm(engine, source)
+
+        np.testing.assert_allclose(output, source * 0.25, rtol=0, atol=1e-7)
+    finally:
+        engine.close()
+
+
+def test_pause_resume_keeps_the_in_progress_gain_state(flac_path: Path) -> None:
+    class FakePlaybackDevice:
+        def start(self, _callback: object) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    engine = AudioEngine(RATE)
+    try:
+        assert engine.load(str(flac_path))
+        engine._device = FakePlaybackDevice()  # type: ignore[assignment]
+        source = np.ones((2, 2), dtype=np.float32)
+        _process_pcm(engine, source)
+        engine.volume = 0.0
+        _process_pcm(engine, source)
+
+        assert engine.play()
+        engine.pause()
+        engine.volume = 0.25
+        assert engine.play()
+
+        output = _process_pcm(engine, source)
+        previous_gain = 510 / 512
+        expected_first_gain = previous_gain + (0.25 - previous_gain) / 512
+        np.testing.assert_allclose(
+            output[0], np.full(2, expected_first_gain, dtype=np.float32), rtol=0, atol=1e-7
+        )
+    finally:
+        engine.close()
+
+
 def test_analyzer_sees_signal_even_when_muted(flac_path: Path) -> None:
     """音質量測看的是檔案本身，不該被音量旋鈕影響。"""
     engine = AudioEngine(RATE)
