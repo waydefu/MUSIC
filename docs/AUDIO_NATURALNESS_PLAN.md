@@ -167,7 +167,9 @@ rollback：候選 flag 預設關；舊 config 可讀、sanitize 新值、保留 
 | 更新現行順序、官方／GitHub 方法、R1 封包與 R2–G gate | 文件已完成 |
 | renderer／constant-gain 匯出／manifest／針對工具的回歸 | **已通過：13 項工具測試、Ruff、src＋工具 Mypy** |
 | 兩首原曲 pilot baseline | **已完成 20 WAV**，每首交付 spread 0.01 LU、limiter 全程 gain=1；[實際結果](NATURALNESS_PREPARATION_RESULT.md)，不是自然度改善候選 |
-| R1 四項產品修正、C／D 演算法、R3 新映射 | **尚未實作**，已指定位置與驗收 |
+| R1-A／R1-B 播放安全修正 | **本分支已實作並通過本機相關測試；待 CI、review 與 merge** |
+| R1-C／R1-D、C／D 演算法、R3 新映射 | **尚未實作**，已指定位置與驗收 |
 | 新版 100% 主觀接受、完整裝置性能、installer／release | **NOT_RUN** |
+| 擴大自然度／DSP 來源研究 | [200 個外部來源報告](AURORA_AUDIO_RESEARCH_200.md)，另列 14 個固定 commit 的專案基線 |
 
-下一個產品實作先做 R1-A／R1-B；R0 結果可並行協助 R2 查因。R1 完成後每次只疊一個音色因素，用相同 renderer／曲目／模式重跑，再決定候選是否進產品。
+R1-A／R1-B 已在本分支實作；合併前仍待 CI 與 review。下一個產品實作做 R1-C／R1-D；R0 結果可並行協助 R2 查因。R1 完成後每次只疊一個音色因素，用相同 renderer／曲目／模式重跑，再決定候選是否進產品。
