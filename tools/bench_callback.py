@@ -282,6 +282,13 @@ def run_offline(
     source: Path, sample_rate: int, target: int, frames: int, chain: str, binaural: bool
 ) -> int:
     engine = TimedEngine(sample_rate, capacity=target + WARMUP_CALLBACKS + 16)
+    # 離線 CLI 可指定大於裝置緩衝的 block；先擴大 graph 工作區，避免安全網
+    # 將超容量的 benchmark 靜默降級成 bypass，最後量到錯的級聯。
+    engine.graph.prepare(
+        sample_rate,
+        engine.output_format.channels,
+        max(frames, engine._max_callback_frames()),
+    )
     install_chain(engine, chain, binaural)
     if not engine.load(str(source)):
         print(f"載入失敗：{source}", file=sys.stderr)
@@ -291,7 +298,15 @@ def run_offline(
     # seek 本身不會呼叫 _process，所以不會混進計時樣本。
     total = target + WARMUP_CALLBACKS
     while engine.count < total:
-        if engine.pump(frames) == 0 and not engine.seek(0.0):
+        advanced = engine.pump(frames)
+        if engine.graph.degraded:
+            print(
+                f"DSP graph 已降級，benchmark 無效：{engine.graph.degradation_reason}",
+                file=sys.stderr,
+            )
+            engine.close()
+            return 2
+        if advanced == 0 and not engine.seek(0.0):
             break
 
     if engine.count <= WARMUP_CALLBACKS:
@@ -301,6 +316,13 @@ def run_offline(
     # 窗要夠大才問得出 gen0 —— CPython 的門檻是「配置減釋放 > 700」，
     # 窗太小的話「沒觸發」可能只是還沒累積到，而不是真的乾淨。
     pressure = _measure_pressure(engine, frames, rounds=2000)
+    if engine.graph.degraded:
+        print(
+            f"DSP graph 已降級，benchmark 無效：{engine.graph.degradation_reason}",
+            file=sys.stderr,
+        )
+        engine.close()
+        return 2
     engine.close()
     return _report(
         engine.samples_ms()[WARMUP_CALLBACKS:],
@@ -340,6 +362,9 @@ def run_device(
     ui.start()
 
     def poll() -> None:
+        if engine.graph.degraded:
+            app.quit()
+            return
         if engine.take_finished():
             engine.seek(0.0)
             engine.play()
@@ -352,6 +377,13 @@ def run_device(
     watchdog.start()
 
     app.exec()
+    if engine.graph.degraded:
+        print(
+            f"DSP graph 已降級，benchmark 無效：{engine.graph.degradation_reason}",
+            file=sys.stderr,
+        )
+        engine.close()
+        return 2
     engine.close()
 
     if engine.count <= WARMUP_CALLBACKS:

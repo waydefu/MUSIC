@@ -1,12 +1,11 @@
 """DSP 級聯與安全網的測試。
 
-這裡守的是 ``core/dsp_graph.py`` docstring 裡那五條規則。它們不是風格建議：
+這裡守的是 ``core/dsp_graph.py`` docstring 裡那六條規則。它們不是風格建議：
 違反其中任何一條，症狀都會是難以重現的爆音、斷續，或是播放靜靜停住 ——
 而不是乾脆的錯誤。所以每一條都要有機器判定得了的測試。
 
-特別是「例外不得殺死回呼」那條。它抓的是**現況**的缺陷：在 graph 進來
-之前，``AudioEngine._process`` 完全沒有防護，任何例外都會讓 miniaudio 的
-產生器結束，播放停在那裡而 UI 什麼都不知道。
+特別是「例外不得殺死回呼」與「PCM 交易提交」：任何 stage 的失敗都必須
+保留原始輸出、讓 graph 降級，而不能讓 miniaudio 的產生器結束。
 """
 
 from __future__ import annotations
@@ -77,7 +76,16 @@ class Exploding(AudioProcessor):
         return 0
 
 
-# ------------------------------------------------------------------ 規則 5：bypass
+class PartialWriteExploding(Exploding):
+    """先破壞一部分工作訊號再失敗，模擬第二聲道途中拋錯。"""
+
+    def process(self, buf: FloatArray) -> None:
+        self.calls += 1
+        buf[buf.size // 2 :] *= 2.0
+        raise RuntimeError("second channel boom")
+
+
+# ------------------------------------------------------------------ 規則 6：bypass
 
 
 def test_empty_graph_is_bit_identical() -> None:
@@ -92,6 +100,7 @@ def test_empty_graph_is_bit_identical() -> None:
 def test_hard_bypass_is_bit_identical() -> None:
     """章程 §15 的 KPI：Hard Bypass 必須 bit-identical，不是「幾乎一樣」。"""
     graph = DspGraph()
+    graph.prepare(RATE, 2, 4096)
     graph.set_stages((Gain(0.5),))
     graph.bypass = True
 
@@ -111,6 +120,7 @@ def test_hard_bypass_is_bit_identical() -> None:
 
 def test_stages_run_in_order_in_place() -> None:
     graph = DspGraph()
+    graph.prepare(RATE, 2, 4096)
     graph.set_stages((Gain(2.0), Gain(3.0)))
     buf = _signal()
     expected = buf * 6.0
@@ -137,6 +147,7 @@ def test_bypassed_graph_reports_no_latency() -> None:
 
 def test_exception_degrades_permanently_and_leaves_audio_untouched() -> None:
     graph = DspGraph()
+    graph.prepare(RATE, 2, 4096)
     boom = Exploding()
     graph.set_stages((boom,))
 
@@ -150,6 +161,47 @@ def test_exception_degrades_permanently_and_leaves_audio_untouched() -> None:
     assert np.array_equal(buf, original)
 
 
+def test_partial_stage_writes_never_escape_to_the_caller_buffer() -> None:
+    graph = DspGraph()
+    graph.prepare(RATE, 2, 4096)
+    boom = PartialWriteExploding()
+    graph.set_stages((Gain(0.5), boom))
+
+    buf = _signal()
+    original = buf.copy()
+    graph.process(buf)
+
+    assert graph.degraded
+    assert "second channel boom" in (graph.degradation_reason or "")
+    assert np.array_equal(buf, original)
+
+
+def test_unprepared_graph_fails_closed_without_touching_audio() -> None:
+    graph = DspGraph()
+    graph.set_stages((Gain(0.5),))
+    buf = _signal()
+    original = buf.copy()
+
+    graph.process(buf)
+
+    assert graph.degraded
+    assert np.array_equal(buf, original)
+
+
+def test_buffer_over_prepared_capacity_is_untouched_and_degrades() -> None:
+    graph = DspGraph()
+    graph.prepare(RATE, 2, 8)
+    graph.set_stages((Gain(0.5),))
+    buf = _signal(frames=9)
+    original = buf.copy()
+
+    graph.process(buf)
+
+    assert graph.degraded
+    assert "capacity" in (graph.degradation_reason or "").lower()
+    assert np.array_equal(buf, original)
+
+
 def test_degraded_graph_does_not_retry_every_callback() -> None:
     """降級後不可以再呼叫壞掉的處理器。
 
@@ -157,6 +209,7 @@ def test_degraded_graph_does_not_retry_every_callback() -> None:
     會製造大量垃圾，長尾 latency 會直接爆掉。
     """
     graph = DspGraph()
+    graph.prepare(RATE, 2, 4096)
     boom = Exploding()
     graph.set_stages((boom,))
 
@@ -169,6 +222,7 @@ def test_degraded_graph_does_not_retry_every_callback() -> None:
 def test_reset_does_not_clear_degradation() -> None:
     """換一首歌不會把壞掉的處理器修好。"""
     graph = DspGraph()
+    graph.prepare(RATE, 2, 4096)
     graph.set_stages((Exploding(),))
     graph.process(_signal())
     assert graph.degraded
@@ -183,6 +237,7 @@ def test_reset_does_not_clear_degradation() -> None:
 def test_degradation_is_consumed_once() -> None:
     """跟 take_finished 同一個模式：回呼設旗標，主執行緒取走。"""
     graph = DspGraph()
+    graph.prepare(RATE, 2, 4096)
     graph.set_stages((Exploding(),))
     graph.process(_signal())
 
@@ -191,6 +246,47 @@ def test_degradation_is_consumed_once() -> None:
     assert graph.take_degradation() is None
     # 取走的是「事件」，診斷用的原因要留著。
     assert graph.degradation_reason is not None
+
+
+def test_explicit_recovery_resets_partial_stage_history() -> None:
+    class StatefulPartialFailure(Gain):
+        def __init__(self) -> None:
+            super().__init__(0.5)
+            self.history = 0
+            self.fail_next = True
+
+        def process(self, buf: FloatArray) -> None:
+            if self.history:
+                raise RuntimeError("stale history reused")
+            if self.fail_next:
+                self.fail_next = False
+                self.history = 1
+                buf[buf.size // 2 :] *= 2.0
+                raise RuntimeError("partial write")
+            buf *= self.factor
+
+        def reset(self) -> None:
+            super().reset()
+            self.history = 0
+
+    graph = DspGraph()
+    graph.prepare(RATE, 2, 4096)
+    stage = StatefulPartialFailure()
+    graph.set_stages((stage,))
+    buf = _signal()
+    original = buf.copy()
+    graph.process(buf)
+    assert graph.degraded
+    assert np.array_equal(buf, original)
+
+    graph.clear_degradation()
+    assert not graph.degraded
+    assert stage.resets == 1
+
+    recovered = _signal()
+    expected = recovered * 0.5
+    graph.process(recovered)
+    assert np.allclose(recovered, expected)
 
 
 # ------------------------------------------------------------------ 生命週期
@@ -277,6 +373,7 @@ def test_steady_state_does_not_accumulate_allocations() -> None:
     「每次回呼都新建一批 ndarray」那種等級的事。
     """
     graph = DspGraph()
+    graph.prepare(RATE, 2, 4096)
     graph.set_stages((Gain(1.0), Gain(1.0)))
     buf = _signal(2880)
 
@@ -316,9 +413,8 @@ def test_engine_prepares_graph_with_room_for_a_full_callback() -> None:
 def test_engine_keeps_playing_when_a_processor_explodes(flac_path: Path) -> None:
     """回歸測試：DSP 出錯不得殺死音訊回呼。
 
-    在 graph 進來之前，_process 完全沒有防護 —— 任何例外都會讓 miniaudio
-    的產生器結束，播放停在那裡而 UI 什麼都不知道。這條測試守住修好之後
-    的行為。
+    graph 必須攔住處理器例外、降級成 bypass，不能讓 miniaudio 的產生器
+    結束而令播放停止。
     """
     engine = AudioEngine(RATE)
     assert engine.load(str(flac_path))
