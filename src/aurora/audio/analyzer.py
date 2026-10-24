@@ -44,12 +44,17 @@ class RingBuffer:
             return self._written
 
     def write(self, samples: FloatArray) -> None:
-        """由音訊回呼呼叫。只做取模與複製，沒有配置記憶體。"""
+        """由音訊回呼呼叫。只做取模與複製，不做分析。"""
         if samples.size == 0:
             return
-        chunk = samples[-self._capacity :] if samples.size > self._capacity else samples
+
+        total = int(samples.size)
+        skipped = max(0, total - self._capacity)
+        chunk = samples[skipped:]
         with self._lock:
-            start = self._written % self._capacity
+            # oversized write 仍要讓絕對 cursor 前進完整輸入長度；儲存位置
+            # 對應被保留下來的最後一圈，而不是假裝前面的樣本沒存在過。
+            start = (self._written + skipped) % self._capacity
             end = start + chunk.size
             if end <= self._capacity:
                 self._data[start:end] = chunk
@@ -57,21 +62,23 @@ class RingBuffer:
                 split = self._capacity - start
                 self._data[start:] = chunk[:split]
                 self._data[: end - self._capacity] = chunk[split:]
-            self._written += int(chunk.size)
+            self._written += total
+
+    def _copy_latest_locked(self, count: int, written: int) -> FloatArray:
+        """在已持有鎖時，複製截至 written 的最後 count 個樣本。"""
+        available = min(count, written, self._capacity)
+        if available <= 0:
+            return np.zeros(0, dtype=np.float32)
+        start = (written - available) % self._capacity
+        end = start + available
+        if end <= self._capacity:
+            return self._data[start:end].copy()
+        return np.concatenate((self._data[start:], self._data[: end - self._capacity]))
 
     def latest(self, count: int) -> FloatArray:
-        """最新的 ``count`` 個樣本，依時間順序排列。不足則前面補零。"""
+        """最新的 count 個樣本，依時間順序排列。不足則前面補零。"""
         with self._lock:
-            written = self._written
-            if written == 0:
-                return np.zeros(count, dtype=np.float32)
-            available = min(count, written, self._capacity)
-            start = (written - available) % self._capacity
-            end = start + available
-            if end <= self._capacity:
-                view = self._data[start:end].copy()
-            else:
-                view = np.concatenate((self._data[start:], self._data[: end - self._capacity]))
+            view = self._copy_latest_locked(count, self._written)
 
         if view.size >= count:
             return view.astype(np.float32, copy=False)
@@ -80,13 +87,19 @@ class RingBuffer:
         return padded
 
     def read_since(self, cursor: int) -> tuple[FloatArray, int]:
-        """回傳游標之後的新樣本與新游標。落後太多時只拿得到最後一圈。"""
+        """原子取得 cursor 之後的新樣本與對應的新 cursor。
+
+        written、視窗範圍與資料 copy 都在同一次 lock 內決定，避免 writer
+        插在先讀 cursor、再 latest 的中間，造成新資料提早混入、之後又重複。
+        落後超過容量時只回最後一圈，但 cursor 仍前進到真實 written 位置。
+        """
         with self._lock:
             written = self._written
-        pending = written - cursor
-        if pending <= 0:
-            return np.zeros(0, dtype=np.float32), written
-        return self.latest(min(pending, self._capacity)), written
+            pending = written - cursor
+            if pending <= 0:
+                return np.zeros(0, dtype=np.float32), written
+            count = min(pending, self._capacity)
+            return self._copy_latest_locked(count, written), written
 
 
 class Analyzer:
