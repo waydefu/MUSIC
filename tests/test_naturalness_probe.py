@@ -100,6 +100,57 @@ def test_no_device_is_opened(monkeypatch: pytest.MonkeyPatch) -> None:
     assert np.all(np.isfinite(result.samples))
 
 
+def test_render_exposes_aligned_limiter_gain_envelope() -> None:
+    source = signal(4096)
+    dry = probe.render_arm(source, probe.ARMS[0], rate=48000, profile="synthetic")
+    effect = probe.render_arm(source, probe.ARMS[5], rate=48000, profile="synthetic")
+
+    assert dry.limiter_gain is None
+    assert effect.limiter_gain is not None
+    assert effect.limiter_gain.shape == (len(effect.samples),)
+    assert np.all(np.isfinite(effect.limiter_gain))
+    assert np.all(effect.limiter_gain > 0.0)
+    assert np.all(effect.limiter_gain <= 1.0)
+
+
+def test_hot_input_records_limiter_gain_reduction() -> None:
+    hot = np.random.default_rng(777).normal(0.0, 1.2, (12000, 2)).astype(np.float32)
+    rendered = probe.render_arm(hot, probe.ARMS[5], rate=48000, profile="synthetic")
+
+    summary = probe.gain_envelope_summary(rendered.limiter_gain)
+    assert summary["present"]
+    assert summary["minimum_gain"] < 1.0
+    assert summary["max_gain_reduction_db"] > 0.0
+    assert summary["reduced_frames"] > 0
+    assert 0.0 < summary["reduced_fraction"] <= 1.0
+
+
+def test_objective_spatial_metrics_keep_signed_correlation_and_band_energy_separate() -> None:
+    rate = 48000
+    frames = rate
+    phase = np.arange(frames, dtype=np.float64) / rate
+    left = 0.25 * np.sin(2 * np.pi * 100.0 * phase)
+    samples = np.column_stack((left, -left)).astype(np.float32)
+
+    metrics = probe.objective_spatial_metrics(samples, rate)
+
+    assert metrics["zero_lag_correlation"] == pytest.approx(-1.0, abs=1e-6)
+    assert metrics["fullband_iacc_1ms"] == pytest.approx(1.0, abs=1e-6)
+    bands = metrics["band_rms_dbfs"]
+    assert bands["80_250_hz"] > bands["1k_4k_hz"] + 40.0
+
+
+def test_gain_envelope_summary_handles_dry_path() -> None:
+    summary = probe.gain_envelope_summary(None)
+    assert summary == {
+        "present": False,
+        "minimum_gain": 1.0,
+        "max_gain_reduction_db": 0.0,
+        "reduced_frames": 0,
+        "reduced_fraction": 0.0,
+    }
+
+
 def test_stream_decoder_uses_real_context_and_rejects_short_source(tmp_path: Path) -> None:
     rate = 48000
     frames = 4 * rate
