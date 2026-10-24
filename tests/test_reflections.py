@@ -408,12 +408,12 @@ def test_binaural_reflections_are_decorrelated_between_the_ears() -> None:
     stereo = _reflection_only(_make(1.0), signal)
     binaural = _reflection_only(_binaural(1.0), signal)
 
-    stereo_iacc = float(np.corrcoef(stereo[:, 0], stereo[:, 1])[0, 1])
-    binaural_iacc = float(np.corrcoef(binaural[:, 0], binaural[:, 1])[0, 1])
+    stereo_zero_lag = float(np.corrcoef(stereo[:, 0], stereo[:, 1])[0, 1])
+    binaural_zero_lag = float(np.corrcoef(binaural[:, 0], binaural[:, 1])[0, 1])
 
-    assert stereo_iacc > 0.5, "立體聲那條路本來就該是高度相關的"
-    assert binaural_iacc < 0.3, "雙耳反射沒有去相關，頭外化的機制就沒生效"
-    assert binaural_iacc > -0.3, "反射變成強烈反相，那聽起來會是在頭裡面"
+    assert stereo_zero_lag > 0.5, "立體聲那條路本來就該是高度相關的"
+    assert binaural_zero_lag < 0.3, "雙耳反射沒有去相關，頭外化的機制就沒生效"
+    assert binaural_zero_lag > -0.3, "反射變成強烈反相，那聽起來會是在頭裡面"
 
 
 def test_binaural_reflections_carry_no_low_frequency_content() -> None:
