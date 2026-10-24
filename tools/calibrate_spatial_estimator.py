@@ -22,8 +22,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -78,12 +79,13 @@ def model_target(source_mix: float, pan_gain: float) -> ModelTarget:
         return ModelTarget(direct, ambient_axis, total, 0.0, 0.0)
 
     direct_fraction = direct / total
-    if direct == 0.0:
-        wiener = 0.0
-    else:
-        # Along the dominant axis, Cx has power P+A. The Wiener gain is
-        # P/(P+A), so output primary power is P^2/(P+A).
-        wiener = (direct * direct / (direct + ambient_axis)) / total
+    # Along the dominant axis, Cx has power P+A. The Wiener gain is
+    # P/(P+A), so output primary power is P^2/(P+A).
+    wiener = (
+        0.0
+        if direct == 0.0
+        else direct * direct / (direct + ambient_axis) / total
+    )
     return ModelTarget(direct, ambient_axis, total, direct_fraction, wiener)
 
 
