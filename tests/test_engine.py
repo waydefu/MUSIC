@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 import shutil
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import pytest
@@ -490,7 +491,7 @@ def test_ring_buffer_read_since_takes_cursor_and_data_from_one_snapshot(
             self._inner = inner
             self._hook: Callable[[], None] | None = hook
 
-        def __enter__(self) -> "HookedLock":
+        def __enter__(self) -> HookedLock:
             self._inner.acquire()
             return self
 
