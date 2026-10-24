@@ -814,8 +814,8 @@ def run(args: argparse.Namespace) -> Path:
             "Preroll starts from zero DSP history; verify 2s versus longer context convergence.",
             "Context decode start is floored to the global source STFT-hop grid.",
             "Real postroll precedes zero tail flushing; EOF-shortened context is explicit.",
-            "Full-band IACC/correlation and band RMS are diagnostic descriptors, not naturalness scores.",
-            "Normal-level diagnostics do not replace controlled listening for externalization or preference.",
+            "Full-band IACC/correlation and band RMS are diagnostic descriptors, "\n            "not naturalness scores.",
+            "Normal-level diagnostics do not replace controlled listening for externalization "\n            "or preference.",
             "No real device, QML, driver or authoritative callback performance measurement.",
         ],
     }
