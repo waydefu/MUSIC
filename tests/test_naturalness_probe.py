@@ -151,6 +151,40 @@ def test_gain_envelope_summary_handles_dry_path() -> None:
     }
 
 
+def test_normal_level_diagnostics_connects_deltas_and_gain_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = signal(4096)
+    monkeypatch.setattr(probe, "ARMS", (probe.ARMS[0], probe.ARMS[5]))
+
+    def simple_levels(samples: np.ndarray, _rate: int) -> dict[str, float]:
+        peak = float(np.abs(samples).max())
+        rms = float(np.sqrt(np.mean(samples.astype(np.float64) ** 2)))
+        return {
+            "integrated_lufs": 20.0 * np.log10(max(rms, 1e-30)),
+            "true_peak_dbtp": 20.0 * np.log10(max(peak, 1e-30)),
+            "sample_peak_dbfs": 20.0 * np.log10(max(peak, 1e-30)),
+            "rms_dbfs": 20.0 * np.log10(max(rms, 1e-30)),
+        }
+
+    monkeypatch.setattr(probe, "measure_loudness", simple_levels)
+    rows, envelopes = probe.normal_level_diagnostics(
+        source,
+        before=0,
+        length=len(source),
+        rate=48000,
+        profile="synthetic",
+        block_frames=2880,
+        flush_seconds=0.5,
+    )
+
+    assert [row["arm"] for row in rows] == ["dry", "current_full_100"]
+    assert rows[0]["delta_vs_dry"]["integrated_lufs"] == pytest.approx(0.0)
+    assert "band_rms_db" in rows[1]["delta_vs_dry"]
+    assert "current_full_100" in envelopes
+    assert envelopes["current_full_100"].shape == (len(source),)
+
+
 def test_stream_decoder_uses_real_context_and_rejects_short_source(tmp_path: Path) -> None:
     rate = 48000
     frames = 4 * rate
