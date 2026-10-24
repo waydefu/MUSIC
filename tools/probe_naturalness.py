@@ -24,6 +24,7 @@ import miniaudio
 import numpy as np
 import numpy.typing as npt
 
+from aurora.core.acoustics import interaural_cross_correlation, zero_lag_correlation
 from aurora.core.constants import (
     REFLECTION_HRTF_TAPS,
     REFLECTION_KERNEL_TAPS,
@@ -40,6 +41,14 @@ from aurora.core.reflections import EarlyReflections
 from aurora.core.spatial import SpatialUpmix
 
 Audio = npt.NDArray[np.float32]
+GainEnvelope = npt.NDArray[np.float32]
+BANDS_HZ = (
+    ("20_80_hz", 20.0, 80.0),
+    ("80_250_hz", 80.0, 250.0),
+    ("250_1000_hz", 250.0, 1000.0),
+    ("1k_4k_hz", 1000.0, 4000.0),
+    ("4k_12k_hz", 4000.0, 12000.0),
+)
 ROOT = Path(__file__).resolve().parents[1]
 PROVENANCE_FILES = (
     "src/aurora/core/constants.py",
@@ -113,6 +122,7 @@ class ObservedLimiter(Limiter):
         super().__init__()
         self.minimum_gain = 1.0
         self.reduced_frames = 0
+        self._gain_chunks: list[GainEnvelope] = []
 
     def _process_chunk(self, view: Audio) -> None:
         super()._process_chunk(view)
@@ -122,12 +132,19 @@ class ObservedLimiter(Limiter):
             raise RuntimeError("Limiter observer 與當前內部 API 不相容")
         self.minimum_gain = min(self.minimum_gain, float(gains.min()))
         self.reduced_frames += int(np.count_nonzero(gains < 1.0 - 1e-12))
+        self._gain_chunks.append(np.asarray(gains, dtype=np.float32).copy())
+
+    def gain_envelope(self) -> GainEnvelope:
+        if not self._gain_chunks:
+            return np.zeros(0, dtype=np.float32)
+        return np.concatenate(self._gain_chunks)
 
 
 @dataclass
 class Rendered:
     samples: Audio
     diagnostics: dict[str, Any]
+    limiter_gain: GainEnvelope | None
 
 
 def render_arm(
@@ -203,6 +220,13 @@ def render_arm(
     last_peak = float(np.abs(aligned[-min(rate // 10, tail) :]).max())
     if last_peak > 1e-7:
         raise RuntimeError("沖刷尾端尚未回到靜音；增加 flush_seconds")
+    aligned_gain = None
+    if limiter is not None:
+        full_gain = limiter.gain_envelope()
+        if full_gain.shape != (len(output),):
+            raise RuntimeError("Limiter gain envelope 與渲染 frame 數不一致")
+        aligned_gain = full_gain[latency : latency + len(samples) + tail].copy()
+
     return Rendered(
         aligned,
         {
@@ -237,6 +261,7 @@ def render_arm(
             "timing_is_authoritative_device_performance": False,
             "spatial_label_note": "upmix/depth/HRTF retained; not HRTF-only",
         },
+        aligned_gain,
     )
 
 
@@ -343,6 +368,136 @@ def sample_levels(samples: Audio) -> dict[str, float]:
         "sample_peak_dbfs": 20 * math.log10(max(peak, 1e-30)),
         "rms_dbfs": 20 * math.log10(max(rms, 1e-30)),
     }
+
+
+def band_rms_dbfs(samples: Audio, rate: int) -> dict[str, float]:
+    """以 FFT Parseval 能量估算固定寬頻帶 RMS；只用於同素材前後 delta。"""
+    validate_audio(samples)
+    if rate <= 0:
+        raise ValueError("取樣率必須為正值")
+    frames = len(samples)
+    spectrum = np.fft.rfft(samples.astype(np.float64), axis=0)
+    freqs = np.fft.rfftfreq(frames, 1.0 / rate)
+    weights = np.full(freqs.shape, 2.0, dtype=np.float64)
+    weights[0] = 1.0
+    if frames % 2 == 0:
+        weights[-1] = 1.0
+
+    result: dict[str, float] = {}
+    for name, low, high in BANDS_HZ:
+        upper = min(high, rate / 2)
+        mask = (freqs >= low) & (freqs < upper)
+        if not np.any(mask):
+            result[name] = -300.0
+            continue
+        squared = np.abs(spectrum[mask]) ** 2
+        mean_square_per_channel = np.sum(squared * weights[mask, None], axis=0) / frames**2
+        mean_square = float(np.mean(mean_square_per_channel))
+        result[name] = 10.0 * math.log10(max(mean_square, 1e-30))
+    return result
+
+
+def objective_spatial_metrics(samples: Audio, rate: int) -> dict[str, Any]:
+    """客觀描述值；不把相關性或 IACC 宣稱成自然度分數。"""
+    validate_audio(samples)
+    left = samples[:, 0]
+    right = samples[:, 1]
+    return {
+        "zero_lag_correlation": zero_lag_correlation(left, right),
+        "fullband_iacc_1ms": interaural_cross_correlation(left, right, rate),
+        "band_rms_dbfs": band_rms_dbfs(samples, rate),
+    }
+
+
+def gain_envelope_summary(gain: GainEnvelope | None) -> dict[str, Any]:
+    if gain is None:
+        return {
+            "present": False,
+            "minimum_gain": 1.0,
+            "max_gain_reduction_db": 0.0,
+            "reduced_frames": 0,
+            "reduced_fraction": 0.0,
+        }
+    values = np.asarray(gain, dtype=np.float64)
+    if values.ndim != 1 or not values.size or not np.all(np.isfinite(values)):
+        raise ValueError("Limiter gain envelope 必須是一維有限資料")
+    if np.any(values <= 0.0) or np.any(values > 1.0 + 1e-7):
+        raise ValueError("Limiter gain envelope 超出 (0, 1]")
+    reduced = values < 1.0 - 1e-12
+    minimum = float(values.min())
+    return {
+        "present": True,
+        "minimum_gain": minimum,
+        "max_gain_reduction_db": -20.0 * math.log10(max(minimum, 1e-30)),
+        "reduced_frames": int(np.count_nonzero(reduced)),
+        "reduced_fraction": float(np.mean(reduced)),
+    }
+
+
+def normal_level_diagnostics(
+    samples: Audio,
+    *,
+    before: int,
+    length: int,
+    rate: int,
+    profile: str,
+    block_frames: int,
+    flush_seconds: float,
+) -> tuple[list[dict[str, Any]], dict[str, GainEnvelope]]:
+    """以未額外衰減的原始電平跑全部 arms；只量測，不做聽測輸出。"""
+    rows: list[dict[str, Any]] = []
+    envelopes: dict[str, GainEnvelope] = {}
+    for arm in ARMS:
+        rendered = render_arm(
+            samples,
+            arm,
+            rate=rate,
+            profile=profile,
+            block_frames=block_frames,
+            flush_seconds=flush_seconds,
+        )
+        segment = rendered.samples[before : before + length]
+        if len(segment) != length:
+            raise RuntimeError("正常電平診斷 crop 長度不完整")
+        gain_segment = (
+            rendered.limiter_gain[before : before + length].copy()
+            if rendered.limiter_gain is not None
+            else None
+        )
+        if gain_segment is not None:
+            if len(gain_segment) != length:
+                raise RuntimeError("Limiter gain envelope crop 長度不完整")
+            envelopes[arm.name] = gain_segment
+        rows.append(
+            {
+                "arm": arm.name,
+                "levels": measure_loudness(segment, rate),
+                "spatial_metrics": objective_spatial_metrics(segment, rate),
+                "limiter": gain_envelope_summary(gain_segment),
+            }
+        )
+
+    dry = rows[0]
+    dry_levels = dry["levels"]
+    dry_bands = dry["spatial_metrics"]["band_rms_dbfs"]
+    for row in rows:
+        levels = row["levels"]
+        spatial = row["spatial_metrics"]
+        row["delta_vs_dry"] = {
+            "integrated_lufs": levels["integrated_lufs"] - dry_levels["integrated_lufs"],
+            "true_peak_dbtp": levels["true_peak_dbtp"] - dry_levels["true_peak_dbtp"],
+            "zero_lag_correlation": (
+                spatial["zero_lag_correlation"]
+                - dry["spatial_metrics"]["zero_lag_correlation"]
+            ),
+            "fullband_iacc_1ms": (
+                spatial["fullband_iacc_1ms"] - dry["spatial_metrics"]["fullband_iacc_1ms"]
+            ),
+            "band_rms_db": {
+                name: spatial["band_rms_dbfs"][name] - dry_bands[name] for name in dry_bands
+            },
+        }
+    return rows, envelopes
 
 
 def measure_loudness(samples: Audio, rate: int) -> dict[str, float]:
@@ -501,6 +656,19 @@ def run(args: argparse.Namespace) -> Path:
     )
     length = context["segment_frames"]
     original_segment = decoded[before : before + length]
+    normal_rows: list[dict[str, Any]] = []
+    normal_envelopes: dict[str, GainEnvelope] = {}
+    if args.normal_level_diagnostics:
+        normal_rows, normal_envelopes = normal_level_diagnostics(
+            decoded,
+            before=before,
+            length=length,
+            rate=args.rate,
+            profile=args.profile,
+            block_frames=args.block,
+            flush_seconds=args.flush,
+        )
+
     pre_db = args.pre_db
     trials: list[dict[str, Any]] = []
     renders: list[Rendered] = []
@@ -550,6 +718,14 @@ def run(args: argparse.Namespace) -> Path:
     if args.seed is not None:
         random.Random(args.seed).shuffle(order)
     destination.mkdir(parents=True, exist_ok=False)
+    normal_by_name = {row["arm"]: row for row in normal_rows}
+    for arm_name, envelope in normal_envelopes.items():
+        gain_path = destination / f"normal_limiter_gain_{arm_name}.npy"
+        with gain_path.open("xb") as stream:
+            np.save(stream, envelope, allow_pickle=False)
+        normal_by_name[arm_name]["limiter_gain_envelope_file"] = gain_path.name
+        normal_by_name[arm_name]["limiter_gain_envelope_sha256"] = sha(gain_path)
+
     answer_map: dict[str, str] = {}
     diagnostics = []
     for number, index in enumerate(order, start=1):
@@ -598,6 +774,14 @@ def run(args: argparse.Namespace) -> Path:
         "source_sha256": source_hash,
         "source_media_info": media_info,
         "source_segment_levels": measure_loudness(original_segment, args.rate),
+        "normal_input_diagnostics": normal_rows if args.normal_level_diagnostics else None,
+        "normal_input_diagnostics_note": (
+            "Original decoded level, no extra preattenuation; limiter gain envelope saved "
+            "per effect arm. Correlation/IACC/band metrics are descriptive, not a "
+            "naturalness score."
+            if args.normal_level_diagnostics
+            else "NOT_RUN; pass --normal-level-diagnostics to measure product-level behaviour."
+        ),
         "processing_rate": args.rate,
         "channels": 2,
         **context,
@@ -631,6 +815,10 @@ def run(args: argparse.Namespace) -> Path:
             "Preroll starts from zero DSP history; verify 2s versus longer context convergence.",
             "Context decode start is floored to the global source STFT-hop grid.",
             "Real postroll precedes zero tail flushing; EOF-shortened context is explicit.",
+            "Full-band IACC/correlation and band RMS are diagnostic descriptors, "
+            "not naturalness scores.",
+            "Normal-level diagnostics do not replace controlled listening for externalization "
+            "or preference.",
             "No real device, QML, driver or authoritative callback performance measurement.",
         ],
     }
@@ -675,6 +863,11 @@ def main() -> None:
     parser.add_argument("--postroll", type=float, default=2.0)
     parser.add_argument("--flush", type=float, default=0.5)
     parser.add_argument("--pre-db", type=float, default=-12.0)
+    parser.add_argument(
+        "--normal-level-diagnostics",
+        action="store_true",
+        help="另以原始解碼電平量 LUFS/頻帶/相關性與完整 limiter gain envelope；不匯出聽測 WAV",
+    )
     parser.add_argument("--seed", type=int)
     parser.add_argument("--xm4-power", choices=("unknown", "on", "off"), default="unknown")
     parser.add_argument("--anc", choices=("unknown", "on", "off", "ambient"), default="unknown")
