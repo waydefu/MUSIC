@@ -776,8 +776,9 @@ def run(args: argparse.Namespace) -> Path:
         "source_segment_levels": measure_loudness(original_segment, args.rate),
         "normal_input_diagnostics": normal_rows if args.normal_level_diagnostics else None,
         "normal_input_diagnostics_note": (
-            "Original decoded level, no extra preattenuation; limiter gain envelope saved per effect arm. "
-            "Correlation/IACC/band metrics are descriptive, not a naturalness score."
+            "Original decoded level, no extra preattenuation; limiter gain envelope saved "
+            "per effect arm. Correlation/IACC/band metrics are descriptive, not a "
+            "naturalness score."
             if args.normal_level_diagnostics
             else "NOT_RUN; pass --normal-level-diagnostics to measure product-level behaviour."
         ),
@@ -814,8 +815,10 @@ def run(args: argparse.Namespace) -> Path:
             "Preroll starts from zero DSP history; verify 2s versus longer context convergence.",
             "Context decode start is floored to the global source STFT-hop grid.",
             "Real postroll precedes zero tail flushing; EOF-shortened context is explicit.",
-            "Full-band IACC/correlation and band RMS are diagnostic descriptors, "\n            "not naturalness scores.",
-            "Normal-level diagnostics do not replace controlled listening for externalization "\n            "or preference.",
+            "Full-band IACC/correlation and band RMS are diagnostic descriptors, "
+            "not naturalness scores.",
+            "Normal-level diagnostics do not replace controlled listening for externalization "
+            "or preference.",
             "No real device, QML, driver or authoritative callback performance measurement.",
         ],
     }
