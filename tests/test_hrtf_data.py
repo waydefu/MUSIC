@@ -35,12 +35,20 @@ FFT = SPATIAL_FFT_SIZE
 TAPS = 256
 
 
-def _write_pair(path: Path, rate: int, left_delay: int, right_delay: int) -> None:
-    """寫一個立體聲 WAV：左耳、右耳各一個脈衝，位置由參數決定。"""
+def _write_pair(
+    path: Path,
+    rate: int,
+    left_delay: int,
+    right_delay: int,
+    *,
+    left_gain: float = 0.5,
+    right_gain: float = 0.5,
+) -> None:
+    """寫一個立體聲 WAV：左右耳各一個可控延遲／振幅的脈衝。"""
     left = np.zeros(TAPS)
     right = np.zeros(TAPS)
-    left[left_delay] = 0.5
-    right[right_delay] = 0.5
+    left[left_delay] = left_gain
+    right[right_delay] = right_gain
     frames = np.stack([left, right], axis=1)
     with wave.open(str(path), "wb") as handle:
         handle.setnchannels(2)
@@ -129,6 +137,46 @@ def test_tool_rejects_mono_input(tmp_path: Path) -> None:
 
 # ------------------------------------------------------------------ 時間差
 
+
+def test_interaural_level_difference_survives_the_round_trip(tmp_path: Path) -> None:
+    """可判定的 6.02 dB 耳間振幅差走完整條匯入路徑後仍要保留。
+
+    layout equalisation 只能乘兩耳共同修正，不得把真正的 ILD 一起抹平。
+    這不是冒充真人 HRTF 驗證，而是守住實測資料裡的方向線索不被 importer
+    / loader 破壞這個契約。
+    """
+    lead, far = 8, 20
+    _write_pair(tmp_path / "azi_0,0.wav", RATE, lead, lead)
+    _write_pair(
+        tmp_path / "azi_30,0.wav",
+        RATE,
+        far,
+        lead,
+        left_gain=0.25,
+        right_gain=0.5,
+    )
+    _write_pair(
+        tmp_path / "azi_110,0.wav",
+        RATE,
+        far,
+        lead,
+        left_gain=0.25,
+        right_gain=0.5,
+    )
+
+    out = tmp_path / "ild.npz"
+    assert _convert(tmp_path, out) == 0
+    filters = load_filters(RATE, FFT, out)
+    assert filters is not None
+
+    ipsi = filters.front_sum + filters.front_diff
+    contra = filters.front_sum - filters.front_diff
+    freqs = np.fft.rfftfreq(FFT, 1.0 / RATE)
+    band = (freqs >= 500.0) & (freqs <= 8000.0)
+    ratio = np.median(np.abs(ipsi[band]) / np.maximum(np.abs(contra[band]), 1e-12))
+    ild_db = 20.0 * np.log10(ratio)
+
+    assert ild_db == pytest.approx(20.0 * np.log10(2.0), abs=0.05)
 
 def test_interaural_delay_survives_the_round_trip(tmp_path: Path) -> None:
     """兩耳時間差要原封不動走完 WAV → npz → 濾波器。
