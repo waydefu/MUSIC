@@ -1,7 +1,17 @@
 from __future__ import annotations
 
+import importlib.util
+import sys
+from pathlib import Path
+
 import pytest
-from tools import calibrate_spatial_estimator as calibration
+
+MODULE_PATH = Path(__file__).resolve().parents[1] / "tools/calibrate_spatial_estimator.py"
+SPEC = importlib.util.spec_from_file_location("spatial_estimator_calibration", MODULE_PATH)
+assert SPEC is not None and SPEC.loader is not None
+calibration = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = calibration
+SPEC.loader.exec_module(calibration)
 
 
 def test_model_target_separates_source_fraction_from_wiener_output() -> None:
