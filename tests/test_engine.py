@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import shutil
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -460,6 +462,59 @@ def test_ring_buffer_read_since_tracks_cursor() -> None:
 
     fresh, cursor = ring.read_since(cursor)
     assert fresh.size == 0
+
+
+def test_ring_buffer_oversized_write_keeps_absolute_cursor() -> None:
+    """只存最後一圈，但 cursor 必須代表真正寫入過的樣本總數。"""
+    ring = RingBuffer(4)
+    ring.write(np.arange(100, dtype=np.float32))
+
+    fresh, cursor = ring.read_since(0)
+    assert cursor == 100
+    assert fresh.tolist() == [96.0, 97.0, 98.0, 99.0]
+
+    ring.write(np.array([100.0, 101.0], dtype=np.float32))
+    fresh, cursor = ring.read_since(cursor)
+    assert cursor == 102
+    assert fresh.tolist() == [100.0, 101.0]
+
+
+def test_ring_buffer_read_since_takes_cursor_and_data_from_one_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """模擬 writer 恰好插在 reader 第一次解鎖後；新資料只能留給下一次 read。"""
+    ring = RingBuffer(16)
+    ring.write(np.arange(5, dtype=np.float32))
+
+    class HookedLock:
+        def __init__(self, inner: Any, hook: Callable[[], None]) -> None:
+            self._inner = inner
+            self._hook: Callable[[], None] | None = hook
+
+        def __enter__(self) -> HookedLock:
+            self._inner.acquire()
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            self._inner.release()
+            if self._hook is not None:
+                hook = self._hook
+                self._hook = None
+                hook()
+
+    hooked = HookedLock(
+        ring._lock,
+        lambda: ring.write(np.array([5.0, 6.0, 7.0], dtype=np.float32)),
+    )
+    monkeypatch.setattr(ring, "_lock", hooked)
+
+    fresh, cursor = ring.read_since(0)
+    assert cursor == 5
+    assert fresh.tolist() == [0.0, 1.0, 2.0, 3.0, 4.0]
+
+    fresh, cursor = ring.read_since(cursor)
+    assert cursor == 8
+    assert fresh.tolist() == [5.0, 6.0, 7.0]
 
 
 # ------------------------------------------------------------------ 分析器

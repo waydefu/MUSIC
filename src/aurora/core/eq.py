@@ -189,9 +189,13 @@ class GraphicEqualizer:
         self._sample_rate = 0
         self._channels = 0
         self._nfft = 0
-        self._spectrum: npt.NDArray[np.complex128] | None = None
+        # UI thread publishes one immutable (spectrum, generation) snapshot.
+        # The audio callback reads this tuple exactly once per process() call.
+        self._published: tuple[npt.NDArray[np.complex128] | None, int] = (None, 0)
+        self._applied_generation = 0
+        # Convolution history belongs to the callback. UI/reset paths request a
+        # generation change instead of mutating this buffer concurrently.
         self._tail: npt.NDArray[np.float64] | None = None
-        self._enabled = False
 
     # ------------------------------------------------------------ 設定
 
@@ -207,34 +211,37 @@ class GraphicEqualizer:
     @property
     def is_flat(self) -> bool:
         """全部為 0 dB。此時 :meth:`process` 直接返回，不做任何運算。"""
-        return not self._enabled
+        return not any(abs(value) > 1e-6 for value in self._gains)
 
     def set_gains(self, gains_db: Sequence[float]) -> None:
-        """設定各段增益並重算核心。**只能從主執行緒呼叫。**"""
+        """設定各段增益並發布不可變核心。**只能從主執行緒呼叫。**
+
+        UI thread 先完整設計新核心，最後才以一次 tuple 賦值發布。回呼只在
+        process() 起點 snapshot 一次，因此同一個音訊 block（含左右聲道）
+        不會混到兩版 EQ。核心發布後設為 read-only，避免跨執行緒原地修改。
+        """
         clipped = tuple(
             float(np.clip(value, -EQ_GAIN_LIMIT_DB, EQ_GAIN_LIMIT_DB)) for value in gains_db
         )
         if len(clipped) != len(EQ_BAND_HZ):
             raise ValueError(f"需要 {len(EQ_BAND_HZ)} 段增益，收到 {len(clipped)}")
-        if clipped == self._gains and self._enabled and self._spectrum is not None:
-            # 音效面板每動一格任何滑桿都會重送一次整條曲線；增益沒變就不必
-            # 重跑頻段中心修正（每次數毫秒，在主執行緒上）。
+        if clipped == self._gains:
             return
+
+        was_enabled = not self.is_flat
         self._gains = clipped
-        enabled = any(abs(value) > 1e-6 for value in clipped)
-        if not enabled:
-            # 先關再清：回呼看到 _enabled 為 False 就不會再碰核心。
-            self._enabled = False
-            self._spectrum = None
-            return
-        spectrum = self._design()
-        if not self._enabled and self._tail is not None:
-            # 關著的時候尾巴留著上次開著時的殘響；不清的話重新打開的第一個
-            # 回呼會混進 10 ms 的舊音訊。此刻 _enabled 仍是 False，回呼不會碰它。
-            self._tail.fill(0.0)
-        # 核心先就位、最後才打開 —— 回呼永遠看到一組完整的狀態。
-        self._spectrum = spectrum
-        self._enabled = True
+        enabled = not self.is_flat
+
+        spectrum = self._design() if enabled else None
+        if spectrum is not None:
+            spectrum.setflags(write=False)
+
+        _, generation = self._published
+        # 從 bypass 重新打開時，上一輪 convolution history 不可重播。
+        # 只發布 generation；真正清 history 由 callback 自己做。
+        if enabled and not was_enabled:
+            generation += 1
+        self._published = (spectrum, generation)
 
     # ------------------------------------------------------------ AudioProcessor
 
@@ -246,41 +253,55 @@ class GraphicEqualizer:
         self._nfft = 1 << (max_frames + self._taps - 1).bit_length()
         self._max_frames = max_frames
         self._tail = np.zeros((channels, self._taps - 1), dtype=np.float64)
-        self._spectrum = self._design() if self._enabled else None
+
+        _, generation = self._published
+        spectrum = self._design() if not self.is_flat else None
+        if spectrum is not None:
+            spectrum.setflags(write=False)
+        self._published = (spectrum, generation)
+        self._applied_generation = generation
 
     def reset(self) -> None:
-        """清掉 overlap 尾巴。不清的話 seek 之後會聽到上一段的殘響。"""
-        if self._tail is not None:
-            self._tail.fill(0.0)
+        """要求 callback 在下一個有效 block 前清掉 overlap history。"""
+        spectrum, generation = self._published
+        self._published = (spectrum, generation + 1)
 
     @property
     def latency_frames(self) -> int:
         """線性相位對稱核心的群延遲。全平時沒有處理，也就沒有延遲。"""
-        return 0 if not self._enabled else (self._taps - 1) // 2
+        return 0 if self.is_flat else (self._taps - 1) // 2
 
     def process(self, buf: FloatArray) -> None:
-        if not self._enabled or self._spectrum is None or self._tail is None:
+        # 一次讀出完整 immutable publication；整個 callback 都固定用這版。
+        spectrum, generation = self._published
+        tail = self._tail
+        if spectrum is None or tail is None:
             return
+
         frames = buf.size // self._channels
         if frames == 0:
             return
-        # 區塊比 prepare 宣告的還大時分批做，而不是在回呼裡重新配置。
-        if frames > self._max_frames:
-            step = self._max_frames * self._channels
-            for start in range(0, buf.size, step):
-                self.process(buf[start : start + step])
-            return
+
+        # history 只由 callback 寫；主執行緒只靠 generation 要求清除。
+        if generation != self._applied_generation:
+            tail.fill(0.0)
+            self._applied_generation = generation
 
         view = buf.reshape(frames, self._channels)
-        for channel in range(self._channels):
-            spectrum = np.fft.rfft(view[:, channel], self._nfft)
-            convolved = np.fft.irfft(spectrum * self._spectrum, self._nfft)
-            overlap = self._tail[channel]
-            convolved[: overlap.size] += overlap
-            view[:, channel] = convolved[:frames].astype(np.float32)
-            tail = convolved[frames : frames + overlap.size]
-            overlap[: tail.size] = tail
-            overlap[tail.size :] = 0.0
+        # 超大輸入仍分塊，但沿用 process() 起點的同一份 spectrum snapshot。
+        # 這樣一次 callback 不會在 chunk 邊界混到 UI 剛發布的新係數。
+        for frame_start in range(0, frames, self._max_frames):
+            chunk = view[frame_start : frame_start + self._max_frames]
+            chunk_frames = chunk.shape[0]
+            for channel in range(self._channels):
+                channel_spectrum = np.fft.rfft(chunk[:, channel], self._nfft)
+                convolved = np.fft.irfft(channel_spectrum * spectrum, self._nfft)
+                overlap = tail[channel]
+                convolved[: overlap.size] += overlap
+                chunk[:, channel] = convolved[:chunk_frames].astype(np.float32)
+                new_tail = convolved[chunk_frames : chunk_frames + overlap.size]
+                overlap[: new_tail.size] = new_tail
+                overlap[new_tail.size :] = 0.0
 
     # ------------------------------------------------------------ 內部
 
