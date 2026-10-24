@@ -63,6 +63,122 @@ def interaural_cross_correlation(
     return float(np.clip(best / denominator, 0.0, 1.0))
 
 
+def octave_band_filter(
+    samples: npt.ArrayLike,
+    sample_rate: int,
+    centre_hz: float,
+    *,
+    taps: int = 1025,
+) -> RealArray:
+    """離線用的一倍頻程 FIR；保留時間對齊，不宣稱 ISO 濾波器相容。
+
+    通帶邊界為 centre/sqrt(2) 到 centre*sqrt(2)。核心是奇數抽頭、
+    Kaiser-windowed sinc，前後補零後用 valid convolution，所以輸出長度與
+    原訊號相同，且不額外移動直達聲位置。這個函式只用於診斷 IACC 分頻帶，
+    不進 realtime renderer。
+    """
+    signal = np.asarray(samples, dtype=np.float64)
+    if signal.ndim != 1 or signal.size == 0 or not np.all(np.isfinite(signal)):
+        raise ValueError("濾波需要非空且有限的一維訊號")
+    if sample_rate <= 0 or not np.isfinite(centre_hz) or centre_hz <= 0.0:
+        raise ValueError("取樣率與中心頻率必須為正值")
+    if not isinstance(taps, int) or taps < 3 or taps % 2 == 0:
+        raise ValueError("FIR 抽頭數必須是至少 3 的奇數")
+
+    low = centre_hz / np.sqrt(2.0)
+    high = centre_hz * np.sqrt(2.0)
+    if high >= sample_rate / 2.0:
+        raise ValueError("倍頻程上緣必須低於 Nyquist")
+
+    half = taps // 2
+    offsets = np.arange(taps, dtype=np.float64) - half
+    high_kernel = 2.0 * high / sample_rate * np.sinc(2.0 * high / sample_rate * offsets)
+    low_kernel = 2.0 * low / sample_rate * np.sinc(2.0 * low / sample_rate * offsets)
+    kernel = (high_kernel - low_kernel) * np.kaiser(taps, 8.6)
+
+    response = abs(
+        np.sum(kernel * np.exp(-2j * np.pi * centre_hz / sample_rate * np.arange(taps)))
+    )
+    if response <= 0.0:
+        raise RuntimeError("倍頻程 FIR 中心頻率響應為零")
+    kernel /= response
+
+    padded = np.pad(signal, (half, half))
+    return np.asarray(np.convolve(padded, kernel, mode="valid"), dtype=np.float64)
+
+
+def windowed_iacc(
+    left: npt.ArrayLike,
+    right: npt.ArrayLike,
+    sample_rate: int,
+    *,
+    start_ms: float,
+    end_ms: float,
+    direct_index: int = 0,
+    centre_hz: float | None = None,
+) -> float:
+    """量 BRIR 相對直達聲抵達點的一段 IACC。
+
+    start_ms / end_ms 都相對 direct_index。若指定 centre_hz，會先對完整左右
+    IR 做同一個一倍頻程 FIR，再切時間窗。late window 的終點刻意由呼叫端
+    指定：不同研究與工具對晚期截止時間並不一致。
+    """
+    if sample_rate <= 0:
+        raise ValueError("取樣率必須為正值")
+    x, y = _pair(left, right)
+    if not isinstance(direct_index, int) or not 0 <= direct_index < x.size:
+        raise ValueError("direct_index 必須落在訊號範圍內")
+    if (
+        not np.isfinite(start_ms)
+        or not np.isfinite(end_ms)
+        or start_ms < 0.0
+        or end_ms <= start_ms
+    ):
+        raise ValueError("時間窗必須有限，且滿足 0 <= start < end")
+
+    if centre_hz is not None:
+        x = octave_band_filter(x, sample_rate, centre_hz)
+        y = octave_band_filter(y, sample_rate, centre_hz)
+
+    start = direct_index + int(round(start_ms * sample_rate / 1000.0))
+    end = direct_index + int(round(end_ms * sample_rate / 1000.0))
+    if start >= x.size:
+        raise ValueError("時間窗起點超出訊號")
+    end = min(end, x.size)
+    if end - start < 2:
+        raise ValueError("時間窗太短")
+    return interaural_cross_correlation(x[start:end], y[start:end], sample_rate)
+
+
+def iacc_e3(
+    left: npt.ArrayLike,
+    right: npt.ArrayLike,
+    sample_rate: int,
+    *,
+    direct_index: int = 0,
+) -> dict[str, float]:
+    """常見 room-acoustics IACC_E3：0–80 ms 的 500/1k/2k Hz octave IACC 平均。
+
+    這是 BRIR/房間診斷參數，不是 AURORA 自然度分數，也不應拿來設定單一
+    pass/fail 門檻。呼叫端必須提供已知的直達聲抵達位置。
+    """
+    values = {
+        "500_hz": windowed_iacc(
+            left, right, sample_rate, start_ms=0.0, end_ms=80.0,
+            direct_index=direct_index, centre_hz=500.0,
+        ),
+        "1000_hz": windowed_iacc(
+            left, right, sample_rate, start_ms=0.0, end_ms=80.0,
+            direct_index=direct_index, centre_hz=1000.0,
+        ),
+        "2000_hz": windowed_iacc(
+            left, right, sample_rate, start_ms=0.0, end_ms=80.0,
+            direct_index=direct_index, centre_hz=2000.0,
+        ),
+    }
+    values["mean"] = float(np.mean(tuple(values.values())))
+    return values
+
 def fft_true_peak(samples: npt.ArrayLike, factor: int = LIMITER_TRUE_PEAK_FACTOR) -> float:
     """FFT 零補點插值的峰值 oracle，輸入為 frames × channels。
 
