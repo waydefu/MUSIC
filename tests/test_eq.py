@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import numpy.typing as npt
 import pytest
@@ -167,6 +169,74 @@ def test_turning_back_on_does_not_replay_old_audio() -> None:
     eq.set_gains(gains)
     silence = np.zeros(BLOCK * CHANNELS, dtype=np.float32)
     assert np.abs(_run(eq, silence)).max() == 0.0
+
+
+def test_equalizer_uses_one_filter_snapshot_for_both_channels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """UI 在 FFT 中途換 EQ 時，同一 block 的左右聲道仍必須用同一版核心。"""
+    eq = GraphicEqualizer()
+    eq.prepare(RATE, CHANNELS, BLOCK)
+
+    first = _flat()
+    first[2] = -12.0
+    second = _flat()
+    second[7] = -12.0
+    eq.set_gains(first)
+
+    signal = _tone(125.0, frames=BLOCK)
+    original_irfft = np.fft.irfft
+    switched = False
+
+    def switching_irfft(*args: Any, **kwargs: Any) -> Any:
+        nonlocal switched
+        result = original_irfft(*args, **kwargs)
+        if not switched:
+            switched = True
+            eq.set_gains(second)
+        return result
+
+    monkeypatch.setattr(np.fft, "irfft", switching_irfft)
+    eq.process(signal)
+
+    stereo = signal.reshape(-1, CHANNELS)
+    assert switched
+    np.testing.assert_allclose(stereo[:, 0], stereo[:, 1], rtol=0, atol=1e-7)
+
+
+def test_equalizer_can_be_disabled_mid_block_without_mixing_versions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """UI 在第一聲道 FFT 後關閉 EQ，當前 block 仍完成舊版；下一 block 才 bypass。"""
+    eq = GraphicEqualizer()
+    eq.prepare(RATE, CHANNELS, BLOCK)
+    gains = _flat()
+    gains[2] = -12.0
+    eq.set_gains(gains)
+
+    signal = _tone(125.0, frames=BLOCK)
+    original_irfft = np.fft.irfft
+    switched = False
+
+    def disabling_irfft(*args: Any, **kwargs: Any) -> Any:
+        nonlocal switched
+        result = original_irfft(*args, **kwargs)
+        if not switched:
+            switched = True
+            eq.set_gains(_flat())
+        return result
+
+    monkeypatch.setattr(np.fft, "irfft", disabling_irfft)
+    eq.process(signal)
+
+    stereo = signal.reshape(-1, CHANNELS)
+    assert switched
+    np.testing.assert_allclose(stereo[:, 0], stereo[:, 1], rtol=0, atol=1e-7)
+
+    next_block = _tone(125.0, frames=BLOCK)
+    expected = next_block.copy()
+    eq.process(next_block)
+    assert np.array_equal(next_block, expected)
 
 
 # ------------------------------------------------------------------ 等化器行為
