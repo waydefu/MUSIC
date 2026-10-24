@@ -103,8 +103,13 @@ def octave_band_filter(
         raise RuntimeError("倍頻程 FIR 中心頻率響應為零")
     kernel /= response
 
-    padded = np.pad(signal, (half, half))
-    return np.asarray(np.convolve(padded, kernel, mode="valid"), dtype=np.float64)
+    linear_length = signal.size + kernel.size - 1
+    nfft = 1 << (linear_length - 1).bit_length()
+    convolution = np.fft.irfft(
+        np.fft.rfft(signal, nfft) * np.fft.rfft(kernel, nfft),
+        nfft,
+    )[:linear_length]
+    return np.asarray(convolution[half : half + signal.size], dtype=np.float64)
 
 
 def windowed_iacc(
