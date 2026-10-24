@@ -140,8 +140,8 @@ def windowed_iacc(
         x = octave_band_filter(x, sample_rate, centre_hz)
         y = octave_band_filter(y, sample_rate, centre_hz)
 
-    start = direct_index + int(round(start_ms * sample_rate / 1000.0))
-    end = direct_index + int(round(end_ms * sample_rate / 1000.0))
+    start = direct_index + round(start_ms * sample_rate / 1000.0)
+    end = direct_index + round(end_ms * sample_rate / 1000.0)
     if start >= x.size:
         raise ValueError("時間窗起點超出訊號")
     end = min(end, x.size)
