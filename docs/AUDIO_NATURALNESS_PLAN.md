@@ -1,7 +1,9 @@
 # AURORA 自然空間音效：實作計畫與驗收
 
-更新：2026-10-03。原始碼基線：`5c312527f9733f2e04cd8fc5920d0c7e0ae439c3`。
-本文件接續 [PROJECT_PLAN.md](../PROJECT_PLAN.md) §10.3／§10.7，作為下一輪音訊工作的現行順序；舊文件的實驗紀錄保留作歷史證據。
+更新：2026-11-07。最新狀態入口：[CURRENT_STATUS.md](CURRENT_STATUS.md)。
+本文件負責**自然度實驗設計、候選順序與退出 gate**；專案整體「現在做到哪」不在這裡重複維護。
+
+2026-11-02 的 Issue #43 已完成第一輪 R2 主觀查因：目前最強證據把自然度下降主嫌指向 **SpatialUpmix 升混本身**，而不是 limiter 或 early reflections。depth 會增加 limiter 壓力，但移除 depth 沒有改善自然度，因此後續 R3 先拆 primary/ambient decomposition、binaural renderer 與 makeup，做 loudness-matched、可重複的單因子盲測；F/G（Dense HRTF、BRIR/room）仍須等 R3 證明有剩餘定位／外部化缺口才進。
 
 ## 1. 本輪要改善的行為
 
@@ -9,7 +11,7 @@
 
 因此目標是保留可用的中段聽感，讓高段仍保有低頻厚度、人聲穩定與自然距離感。50–60% 是這位使用者、這副耳機的基準，不是所有耳機的最佳值。100% 是效果強度上限，不代表定位準確度或音質百分比。
 
-本輪先準備量測工具、實驗矩陣與分批實作封包。播放器演算法、已安裝程式及使用者設定尚未改動；後續主觀驗收均為 **NOT_RUN**。不因「零削波」或 CI 通過就宣稱自然度問題已解決。
+R0、R1 與 R2 客觀診斷工具已完成；R2 已有第一輪單人／單曲主觀查因（Issue #43），但證據仍不足以直接改產品預設。後續不因「零削波」、limiter 壓力下降或 CI 通過就宣稱自然度改善；先用解耦候選與 loudness-matched 重複盲測定位 SpatialUpmix 內部因素。
 
 ## 2. 證據、未定事項與量測邊界
 
@@ -169,9 +171,10 @@ rollback：候選 flag 預設關；舊 config 可讀、sanitize 新值、保留 
 | 兩首原曲 pilot baseline | **已完成 20 WAV**，每首交付 spread 0.01 LU、limiter 全程 gain=1；[實際結果](NATURALNESS_PREPARATION_RESULT.md)，不是自然度改善候選 |
 | R1-A／R1-B 播放安全修正 | **已合併 main（PR #38）**；首次 gain/mute 與 graph 原子回退已有回歸 |
 | R1-C／R1-D snapshot 修正 | **已合併 main（PR #39）**；EQ block snapshot 與 analyzer single-lock snapshot 已跨平台 CI |
-| R2 原始音量客觀診斷 | **PR #40 已實作**；LUFS／TP、五段能量、相關／IACC、完整 limiter gain envelope；主觀判定仍 NOT_RUN |
-| C／D 演算法、R3 新映射 | **尚未改產品預設**；要依 R2 真實素材與聽測 gate 才動 |
-| 新版 100% 主觀接受、完整裝置性能、installer／release | **NOT_RUN** |
+| R2 原始音量客觀診斷 | **已合併 main（PR #40）**；LUFS／TP、五段能量、相關／IACC、完整 limiter gain envelope |
+| R2 主觀查因 | **Issue #43 已完成第一輪**：單人／單曲證據指向 SpatialUpmix 本身；limiter／reflection 非目前主嫌，depth 的 GR 改善不等於自然度改善 |
+| C／D 演算法、R3 新映射 | **尚未改產品預設**；下一步先拆 decomposition／binaural renderer／makeup，做 loudness-matched、可重複盲測 |
+| 新版 75–100% 主觀接受、完整裝置性能、installer／release | **NOT_RUN** |
 | 擴大自然度／DSP 來源研究 | [200 個外部來源報告](AURORA_AUDIO_RESEARCH_200.md)，另列 14 個固定 commit 的專案基線 |
 
-R1 四項 correctness/snapshot 工作已完成並進 main。R2 現在可在不額外衰減的原始解碼電平下，保存 limiter gain envelope 並量 LUFS／TP、頻帶能量、zero-lag correlation 與 ±1 ms IACC；這些只作故障定位，不自動判定自然度。下一個需要真實素材的步驟是用同一 renderer／曲目／模式重跑單因子矩陣，再決定 C／D 或 R3 候選是否值得改產品。
+R1 四項 correctness/snapshot 工作已完成並進 main。R2 客觀診斷與第一輪主觀查因也已完成：數值只作故障定位，不自動判定自然度；Issue #43 顯示 limiter gain reduction 與主觀自然度可明顯脫鉤。下一步不是先疊 BRIR 或繼續追單一漂亮指標，而是把 SpatialUpmix 的 decomposition、surround/ambience、binaural renderer 與 makeup 拆成可獨立控制候選，輸出 loudness-matched、blind-ID、含重複刺激的比較組，再由結果決定 C／D 或 R3 產品修改。
