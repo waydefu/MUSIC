@@ -16,7 +16,7 @@ from pathlib import Path
 _KNOWN_PYSIDE_VERSION = "6.11.1"
 _ASSETDOWNLOADER_WARNING = re.compile(
     r"QtLibraryInfo\(PySide6\): QML plugin binary .*[\\/]Qt[\\/]labs[\\/]"
-    r"assetdownloader[\\/](?:lib)?qmlassetdownloaderprivateplugin\.(?:dll|dylib) "
+    r"assetdownloader[\\/](?:lib)?qmlassetdownloaderprivateplugin\.(?:dll|dylib)['\"]? "
     r"does not exist!"
 )
 
