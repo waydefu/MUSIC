@@ -197,7 +197,9 @@ class MacOSAdapter(NullAdapter):
         audio_format_flag_is_float = 1 << 0
         utf8 = 0x08000100
 
-        coreaudio = _load_macos_system_library("System/Library/Frameworks/CoreAudio.framework/CoreAudio")
+        coreaudio = _load_macos_system_library(
+            "System/Library/Frameworks/CoreAudio.framework/CoreAudio"
+        )
         corefoundation = _load_macos_system_library(
             "System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
         )
