@@ -14,6 +14,8 @@ PyInstaller 分析階段仍可安全 import。
 
 from __future__ import annotations
 
+from typing import Any
+
 from aurora.core.models import (
     AudioFormat,
     EndpointInfo,
@@ -24,7 +26,7 @@ from aurora.core.models import (
 from aurora.platform.base import NullAdapter
 
 
-def _load_macos_system_library(relative_path: str):
+def _load_macos_system_library(relative_path: str) -> Any:
     """載入 Apple 系統 library，但不要求 PyInstaller 把它收進 bundle。
 
     PyInstaller 的 ctypes 靜態掃描只支援 basename literal；把 framework 的
