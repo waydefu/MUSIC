@@ -1,0 +1,28 @@
+version: 2
+
+updates:
+  # Python dependencies are managed by uv (pyproject.toml + uv.lock).
+  # Dependabot opens PRs only; merging remains gated by the protected main
+  # branch and the Windows/macOS required checks.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "10:30"
+      timezone: "Asia/Taipei"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+
+  # Keep SHA-pinned GitHub Actions current without returning to floating tags.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "10:30"
+      timezone: "Asia/Taipei"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
