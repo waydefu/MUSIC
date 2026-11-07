@@ -14,7 +14,7 @@ def test_known_pyside_assetdownloader_warning_is_narrowly_allowlisted(tmp_path: 
     qml_root = _qml_root(tmp_path)
     windows = (
         "123 WARNING: QtLibraryInfo(PySide6): QML plugin binary "
-        r"'C:\venv\PySide6\qml\Qt\labs\assetdownloader\"
+        "'C:\\venv\\PySide6\\qml\\Qt\\labs\\assetdownloader\\"
         "qmlassetdownloaderprivateplugin.dll' does not exist!"
     )
     macos = (
