@@ -16,9 +16,6 @@ from aurora.core.models import AudioFormat, EndpointInfo, TransportKind
 from aurora.platform.macos import MacOSAdapter
 
 
-
-
-
 def test_macos_system_library_path_is_built_at_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
