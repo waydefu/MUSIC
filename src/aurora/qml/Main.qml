@@ -784,7 +784,7 @@ Window {
     }
 
     onVisibilityChanged: {
-        if (visibility !== Window.FullScreen) { fullScreen = false; }
+        if (window.visibility !== Window.FullScreen) { fullScreen = false; }
     }
 
     function toggleMiniMode() {
