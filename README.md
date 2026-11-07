@@ -10,6 +10,8 @@ AURORA 是一款以封面、即時頻譜與沉浸式動效為核心的桌面音�
 > 個人使用版 `AURORA.app`。macOS 版本沒有 Apple Developer 簽章、notarization
 > 或正式安裝包。
 
+> 專案目前進度、最新音訊結論與下一步以 [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md) 為唯一權威入口；`PROJECT_PLAN.md` 保留歷史設計與決策演進，不再作「現在做到哪」的來源。
+
 ## 主要功能
 
 - MP3、FLAC、WAV、OGG、OGA 播放
@@ -230,14 +232,12 @@ macOS 的 mypy 要排除 Windows 專屬模組；以這行取代上面的 `uv run
 uv run mypy --exclude 'platform_win' --follow-imports=silent
 ```
 
-目前品質基準（2026-08-22 於 Windows 實測）：
+目前自動化品質基準（2026-11-07，PR #44）：
 
-- Ruff：通過
-- mypy：45 個來源檔通過
-- pytest：482 個測試通過、1 個跳過（`test_macos_platform.py` 的 Core Audio
-  測試只在 macOS 上跑，在 Windows 跳過是正確的）
-- QML 離屏載入：通過
-- Windows 打包版冷啟動：通過
+- Windows：Ruff 通過；mypy 47 個來源檔／0 errors；pytest 635 passed、2 skipped、3 deselected；QML 離屏載入通過。
+- macOS：Ruff 通過；mypy 42 個來源檔／0 errors；pytest 611 passed、1 skipped、3 deselected；QML 離屏載入通過。
+- `--validate-qml` 現在把 QQml runtime warning／binding error 視為失敗，不再只檢查 root object 是否載入。
+- Windows 打包版冷啟動是較早的實機證據；main 的最新變更仍需發行前重新做 build / installer / cold-start 驗收。
 
 CI 蓋不到、只能在實機做的：實際出聲的音訊測試、GUI 外觀、打包驗證，
 以及 callback 效能的權威數字（`tools/bench_callback.py --device`）。
