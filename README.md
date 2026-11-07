@@ -234,12 +234,13 @@ uv run mypy --exclude 'platform_win' --follow-imports=silent
 
 目前自動化品質基準（2026-11-07，PR #44）：
 
-- Windows：Ruff 通過；mypy 47 個來源檔／0 errors；pytest 635 passed、2 skipped、3 deselected；QML 離屏載入通過。
-- macOS：Ruff 通過；mypy 42 個來源檔／0 errors；pytest 611 passed、1 skipped、3 deselected；QML 離屏載入通過。
-- `--validate-qml` 現在把 QQml runtime warning／binding error 視為失敗，不再只檢查 root object 是否載入。
-- Windows 打包版冷啟動是較早的實機證據；main 的最新變更仍需發行前重新做 build / installer / cold-start 驗收。
+- Windows：Ruff 通過；mypy 47 個來源檔／0 errors；pytest 641 passed、2 skipped、3 deselected；QML 離屏載入通過。
+- macOS：Ruff 通過；mypy 42 個來源檔／0 errors；pytest 617 passed、1 skipped、3 deselected；QML 離屏載入通過。
+- `--validate-qml` 把 QQml runtime warning／binding error 視為失敗，不再只檢查 root object 是否載入。
+- 封裝敏感 PR 會在 required job 內額外建立 frozen bundle：Windows 執行 `tools/build_exe.py --verify`，macOS 執行 `tools/build_app.py --verify`。
+- installer、乾淨機 cold-start、GUI 外觀與實際播放仍需發行前人工驗收。
 
-CI 蓋不到、只能在實機做的：實際出聲的音訊測試、GUI 外觀、打包驗證，
+CI 蓋不到、只能在實機做的：實際出聲的音訊測試、GUI 外觀、installer／檔案關聯／cold-start，
 以及 callback 效能的權威數字（`tools/bench_callback.py --device`）。
 
 測試素材由 `tools/make_test_audio.py` 產生到 `tests/_generated/`（需要 `ffmpeg`，
