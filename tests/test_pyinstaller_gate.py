@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from tools.pyinstaller_gate import warning_is_allowlisted
+from pyinstaller_gate import warning_is_allowlisted
 
 
 def _qml_root(tmp_path: Path, content: str = "import QtQuick\nItem {}\n") -> Path:
