@@ -12,9 +12,10 @@ import sys
 import pytest
 
 import aurora.platform as platform
+import aurora.platform.macos as macos_platform
 from aurora.core.btcodec import default_table
 from aurora.core.models import AudioFormat, EndpointInfo, TransportKind
-from aurora.platform.macos import MacOSAdapter, _load_macos_system_library
+from aurora.platform.macos import MacOSAdapter
 
 
 
@@ -32,7 +33,7 @@ def test_macos_system_library_path_is_built_at_runtime(
 
     monkeypatch.setattr(ctypes, "CDLL", fake_cdll)
 
-    result = _load_macos_system_library(
+    result = macos_platform._load_macos_system_library(
         "System/Library/Frameworks/AppKit.framework/AppKit"
     )
 
