@@ -12,9 +12,9 @@ import sys
 import pytest
 
 import aurora.platform as platform
-import aurora.platform.macos as macos_platform
 from aurora.core.btcodec import default_table
 from aurora.core.models import AudioFormat, EndpointInfo, TransportKind
+from aurora.platform import macos as macos_platform
 from aurora.platform.macos import MacOSAdapter
 
 
