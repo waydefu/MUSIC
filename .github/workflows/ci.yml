@@ -67,7 +67,7 @@ jobs:
         run: |
           changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
           printf '%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -Eq '^(\.github/workflows/ci\.yml|pyproject\.toml|aurora\.spec|tools/build_exe\.py|src/aurora/__init__\.py|src/aurora/__main__\.py|src/aurora/core/paths\.py|src/aurora/platform/|src/aurora/platform_win/|src/aurora/qml/|data/)'; then
+          if printf '%s\n' "$changed" | grep -Eq '^(\.github/workflows/ci\.yml|pyproject\.toml|uv\.lock|aurora\.spec|tools/(build_exe|pyinstaller_gate)\.py|src/aurora/__init__\.py|src/aurora/__main__\.py|src/aurora/core/paths\.py|src/aurora/platform/|src/aurora/platform_win/|src/aurora/qml/|data/)'; then
             echo "required=true" >> "$GITHUB_OUTPUT"
             echo "Windows frozen bundle verification required."
           else
@@ -183,7 +183,7 @@ jobs:
         run: |
           changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
           printf '%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -Eq '^(\.github/workflows/ci\.yml|pyproject\.toml|aurora-macos\.spec|tools/build_app\.py|src/aurora/__init__\.py|src/aurora/__main__\.py|src/aurora/core/paths\.py|src/aurora/platform/|src/aurora/qml/|data/)'; then
+          if printf '%s\n' "$changed" | grep -Eq '^(\.github/workflows/ci\.yml|pyproject\.toml|uv\.lock|aurora-macos\.spec|tools/(build_app|pyinstaller_gate)\.py|src/aurora/__init__\.py|src/aurora/__main__\.py|src/aurora/core/paths\.py|src/aurora/platform/|src/aurora/qml/|data/)'; then
             echo "required=true" >> "$GITHUB_OUTPUT"
             echo "macOS frozen bundle verification required."
           else
