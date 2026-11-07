@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import ctypes
 import sys
 
 import pytest
@@ -32,7 +31,7 @@ def test_macos_system_library_path_is_built_at_runtime(
         loaded.append(path)
         return sentinel
 
-    monkeypatch.setattr(ctypes, "CDLL", fake_cdll)
+    monkeypatch.setattr("ctypes.CDLL", fake_cdll)
 
     result = _load_macos_system_library(
         "System/Library/Frameworks/AppKit.framework/AppKit"
