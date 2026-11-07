@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import re
 import subprocess
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 _KNOWN_PYSIDE_VERSION = "6.11.1"
 _ASSETDOWNLOADER_WARNING = re.compile(
