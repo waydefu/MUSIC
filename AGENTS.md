@@ -22,6 +22,8 @@ numpy 做 FFT／音質分析。uv 管相依，PyInstaller `onedir` 打包，Powe
 
 | 想知道 | 權威來源 |
 |---|---|
+| **目前進度、最高優先級、下一步** | [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md) |
+| 自然度實驗設計與 gate | [docs/AUDIO_NATURALNESS_PLAN.md](docs/AUDIO_NATURALNESS_PLAN.md) |
 | 模組責任、依賴方向、執行緒邊界、點歌到出聲的時序 | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | 安裝、快捷鍵、從原始碼執行、建置、品質基準數字 | [README.md](README.md) |
 | 驗證契約、不變量、任務路由、安全邊界 | 本檔 |
@@ -35,6 +37,7 @@ numpy 做 FFT／音質分析。uv 管相依，PyInstaller `onedir` 打包，Powe
 
 | 事實 | 來源 |
 |---|---|
+| **目前專案狀態與下一步** | `docs/CURRENT_STATUS.md`（歷史文件中的「下一步」不得覆蓋它） |
 | 版本號 | `src/aurora/__init__.py` 的 `__version__`（`aurora.spec`、`make_release.py` 都從這裡讀） |
 | Python 版本、相依、lint／型別／測試設定 | `pyproject.toml` |
 | 音訊、頻譜、分析的所有數值常數 | `src/aurora/core/constants.py`（其他模組不得自行寫死） |
