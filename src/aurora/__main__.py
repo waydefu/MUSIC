@@ -148,11 +148,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     app = QGuiApplication(sys.argv[:1])
     app.setWindowIcon(QIcon(str(data_file("aurora-icon.png"))))
     config = load_config()
-    player = PlayerController(config)
-    motion = MotionController(config)
     engine = QQmlApplicationEngine()
+    # Context properties must have explicit C++ ownership.  Leaving these
+    # QObjects parentless lets QML/PySide ownership heuristics differ between
+    # platforms; macOS offscreen validation has observed "motion" becoming
+    # null while bindings are evaluated.
+    player = PlayerController(config, engine)
+    motion = MotionController(config, engine)
     qml_warnings: list[object] = []
-    engine.warnings.connect(qml_warnings.append)
+    engine.warnings.connect(qml_warnings.extend)
     _configure_engine(engine, player, motion)
 
     if not engine.rootObjects():
@@ -161,6 +165,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     if options.validate_qml:
         app.processEvents()
+        # QQmlApplicationEngine.warnings 也會收到載入後才發生的 binding /
+        # JavaScript 錯誤。以前只在 rootObjects() 為空時檢查，結果 TypeError
+        # 明明出現在 CI log，命令仍 exit 0。驗證模式的契約改成：任何 QML
+        # warning 都是失敗；平台/字型等非 QML 訊息不在這個 signal 裡。
+        if qml_warnings:
+            for warning in qml_warnings:
+                print(warning, file=sys.stderr)
+            return 1
         # 印出實際選到的 platform adapter。這一行是給打包驗證用的：
         # adapter() 在找不到平台實作時會**安靜地**退回 NullAdapter，
         # 播放器照樣啟動、QML 照樣載入、exit code 照樣是 0 —— 只有音質
