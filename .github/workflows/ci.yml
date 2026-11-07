@@ -16,6 +16,11 @@
 
 name: CI
 
+# CI 只需要讀取倉庫內容。明確縮小 GITHUB_TOKEN 權限，避免未來新增步驟時
+# 默默繼承 repository default 的較寬權限。
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -34,15 +39,16 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      # 供應鏈依賴固定到官方 release commit，避免浮動 tag 被重指。
+      # actions/checkout v7.0.1 — Node 24
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       # uv 會依 pyproject.toml 的 requires-python 自行取得 3.11。
-      #
-      # 版本要寫完整。setup-uv 從 v8 起就**沒有**發佈 major 移動標籤，
-      # 寫 @v10 會得到 "unable to find version v10" 並在 5 秒內失敗
-      # （已實際踩過）。checkout 與 cache 則有 v4 移動標籤，可以照常寫。
+      # astral-sh/setup-uv v10.3.3 — Node 24；固定到 immutable release commit。
       - name: 安裝 uv
-        uses: astral-sh/setup-uv@v10.0.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
         with:
           enable-cache: true
 
@@ -59,7 +65,8 @@ jobs:
 
       - name: 還原測試素材快取
         id: fixtures
-        uses: actions/cache@v4
+        # actions/cache v6.1.0 — Node 24；固定到官方 release commit。
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: tests/_generated
           key: fixtures-${{ runner.os }}-${{ hashFiles('tools/make_test_audio.py') }}
@@ -121,10 +128,15 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      # 供應鏈依賴固定到官方 release commit，避免浮動 tag 被重指。
+      # actions/checkout v7.0.1 — Node 24
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: 安裝 uv
-        uses: astral-sh/setup-uv@v10.0.1
+        # astral-sh/setup-uv v10.3.3 — Node 24；固定到 immutable release commit。
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
         with:
           enable-cache: true
 
@@ -133,7 +145,8 @@ jobs:
 
       - name: 還原測試素材快取
         id: fixtures
-        uses: actions/cache@v4
+        # actions/cache v6.1.0 — Node 24；固定到官方 release commit。
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: tests/_generated
           key: fixtures-${{ runner.os }}-${{ hashFiles('tools/make_test_audio.py') }}
