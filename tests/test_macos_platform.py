@@ -16,6 +16,28 @@ from aurora.core.models import AudioFormat, EndpointInfo, TransportKind
 from aurora.platform.macos import MacOSAdapter
 
 
+def test_macos_system_library_path_is_built_at_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from aurora.platform.macos import _load_macos_system_library
+
+    loaded: list[str] = []
+    sentinel = object()
+
+    def fake_cdll(path: str):
+        loaded.append(path)
+        return sentinel
+
+    monkeypatch.setattr("ctypes.CDLL", fake_cdll)
+
+    result = _load_macos_system_library(
+        "System/Library/Frameworks/AppKit.framework/AppKit"
+    )
+
+    assert result is sentinel
+    assert loaded == ["/System/Library/Frameworks/AppKit.framework/AppKit"]
+
+
 @pytest.mark.parametrize(
     ("reduce_motion", "expected"),
     ((True, False), (False, True)),

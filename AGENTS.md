@@ -82,8 +82,9 @@ numpy 做 FFT／音質分析。uv 管相依，PyInstaller `onedir` 打包，Powe
 ### 可用的 gate
 
 全部從倉庫根目錄執行。PowerShell 是主要 shell。
-**前五條會由 CI 在 Windows 與 macOS 上自動跑**（`.github/workflows/ci.yml`），
-本機只需要在想快速回饋時執行。
+前四條會在每個 CI 的 Windows 與 macOS job 自動跑；第五條 frozen build gate
+只在**封裝敏感的 PR** 條件式執行（Windows 用 `build_exe.py --verify`，
+macOS 用 `build_app.py --verify`）。本機只需要在想快速回饋時執行。
 
 ```powershell
 uv run ruff check .                       # lint
@@ -107,7 +108,7 @@ runner 沒有音訊裝置。
 | 項目 | 為什麼 |
 |---|---|
 | `-m "audio"` 的測試 | runner 沒有音訊裝置 |
-| `tools/build_exe.py --verify` | 慢，且打包產物的驗證需要另外觸發 |
+| frozen bundle build/verify | 封裝敏感 PR 已由 CI 條件式覆蓋；一般 PR 不重複打包。乾淨機安裝、cold-start 與實際出聲仍需人工 |
 | callback 效能的權威數字 | hosted runner 是共用 VM，尾端數字被鄰居噪音污染。實測同機同碼跑五次 offline，p50 穩定但 max 差 28 倍 —— 詳見 PROJECT_PLAN.md §7.5 |
 | GUI 外觀、動效、實際出聲 | 本質需要人。`--validate-qml` 只證明載得起來 |
 
@@ -122,7 +123,7 @@ runner 沒有音訊裝置。
 | `bridge/`（Qt 模型、執行緒、生命週期） | `ruff` + `mypy` + `pytest` + `--validate-qml` |
 | `qml/`、著色器 | `--validate-qml`（Python gate 完全不覆蓋 QML，見子樹的 AGENTS.md） |
 | `platform_win/`（Core Audio、登錄檔、檔案關聯） | `pytest` + **實機執行**；純測試無法證明登錄檔或裝置行為 |
-| `aurora.spec`、`tools/build_exe.py`、相依變動 | `tools/build_exe.py --verify` |
+| `aurora.spec`、`aurora-macos.spec`、build script、封裝相依變動 | Windows `tools/build_exe.py --verify` + macOS `tools/build_app.py --verify`；CI 對封裝敏感 PR 自動執行 |
 | `packaging/`、發行流程 | `tools/make_release.py`（含 BOM 檢查） |
 | 版本號 | 只改 `src/aurora/__init__.py`，然後跑 `make_release.py` |
 

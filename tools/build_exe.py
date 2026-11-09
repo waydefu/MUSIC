@@ -18,7 +18,10 @@ import shutil
 import subprocess
 import sys
 import time
+from importlib.metadata import version as package_version
 from pathlib import Path
+
+from pyinstaller_gate import run_pyinstaller
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = ROOT / "aurora.spec"
@@ -75,7 +78,13 @@ def build() -> int:
     # Analysis 階段會輸出統計，明確固定 UTF-8，避免建置完成前才因 log 編碼失敗。
     environment["PYTHONIOENCODING"] = "utf-8"
     environment["PYTHONUTF8"] = "1"
-    return subprocess.run(command, cwd=ROOT, check=False, env=environment).returncode
+    return run_pyinstaller(
+        command,
+        cwd=ROOT,
+        env=environment,
+        qml_root=ROOT / "src" / "aurora" / "qml",
+        pyside_version=package_version("PySide6"),
+    )
 
 
 def inspect() -> int:

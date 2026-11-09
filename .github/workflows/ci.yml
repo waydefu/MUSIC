@@ -9,9 +9,9 @@
 # 完全看不出來。tests/test_platform.py 有靜態檢查擋「直接 import
 # platform_win」，但真正證明 macOS 還活著的只有 macos job。
 #
-# 刻意**不**放進 CI 的東西（見 PROJECT_PLAN.md §6.1）：
+# 刻意**不**在每次 CI 都跑的東西（見 PROJECT_PLAN.md §6.1）：
 #   * -m "audio" 的測試 —— runner 沒有音訊裝置
-#   * tools/build_exe.py --verify —— 慢，之後改用 tag／手動觸發
+#   * frozen bundle verify —— 只有封裝敏感的 PR 才在各平台 job 內條件式執行
 #   * benchmark 的權威數字 —— hosted runner 是共用 VM，尾端數字不可信
 
 name: CI
@@ -44,6 +44,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          # 封裝 gate 需要比較 PR 的 base/head，完整歷史讓判定不依賴額外 API 或浮動 action。
+          fetch-depth: 0
 
       # uv 會依 pyproject.toml 的 requires-python 自行取得 3.11。
       # astral-sh/setup-uv v10.3.3 — Node 24；固定到 immutable release commit。
@@ -54,6 +56,24 @@ jobs:
 
       - name: 同步相依
         run: uv sync --dev
+
+      - name: 判定 Windows 封裝 gate
+        id: packaging
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -Eq '^(\.github/workflows/ci\.yml|pyproject\.toml|uv\.lock|aurora\.spec|tools/(build_exe|pyinstaller_gate)\.py|src/aurora/__init__\.py|src/aurora/__main__\.py|src/aurora/core/paths\.py|src/aurora/platform/|src/aurora/platform_win/|src/aurora/qml/|data/)'; then
+            echo "required=true" >> "$GITHUB_OUTPUT"
+            echo "Windows frozen bundle verification required."
+          else
+            echo "required=false" >> "$GITHUB_OUTPUT"
+            echo "No Windows packaging-sensitive changes."
+          fi
 
       # ---------------------------------------------------------------- 測試素材
       #
@@ -122,6 +142,14 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: uv run aurora --validate-qml
 
+      # 封裝敏感 PR 必須在真正 frozen 的 EXE 內再驗一次 QML、platform adapter、
+      # 必要 DLL/CFFI 模組與禁止的 Qt 贅重內容。這不是每個 PR 都跑的昂貴 gate。
+      - name: Windows frozen bundle 驗證
+        if: github.event_name == 'pull_request' && steps.packaging.outputs.required == 'true'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run python tools/build_exe.py --verify
+
   macos:
     name: macOS
     runs-on: macos-latest
@@ -133,6 +161,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          # 封裝 gate 需要比較 PR 的 base/head，完整歷史讓判定不依賴額外 API 或浮動 action。
+          fetch-depth: 0
 
       - name: 安裝 uv
         # astral-sh/setup-uv v10.3.3 — Node 24；固定到 immutable release commit。
@@ -142,6 +172,24 @@ jobs:
 
       - name: 同步相依
         run: uv sync --dev
+
+      - name: 判定 macOS 封裝 gate
+        id: packaging
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -Eq '^(\.github/workflows/ci\.yml|pyproject\.toml|uv\.lock|aurora-macos\.spec|tools/(build_app|pyinstaller_gate)\.py|src/aurora/__init__\.py|src/aurora/__main__\.py|src/aurora/core/paths\.py|src/aurora/platform/|src/aurora/qml/|data/)'; then
+            echo "required=true" >> "$GITHUB_OUTPUT"
+            echo "macOS frozen bundle verification required."
+          else
+            echo "required=false" >> "$GITHUB_OUTPUT"
+            echo "No macOS packaging-sensitive changes."
+          fi
 
       - name: 還原測試素材快取
         id: fixtures
@@ -205,3 +253,7 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: uv run aurora --validate-qml
+
+      - name: macOS frozen bundle 驗證
+        if: github.event_name == 'pull_request' && steps.packaging.outputs.required == 'true'
+        run: uv run python tools/build_app.py --verify

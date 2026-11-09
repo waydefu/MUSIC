@@ -24,10 +24,11 @@
 |---|---:|---:|
 | Ruff | PASS | PASS |
 | mypy | 47 source files / 0 errors | 42 source files / 0 errors |
-| pytest | 635 passed / 2 skipped / 3 deselected | 611 passed / 1 skipped / 3 deselected |
+| pytest | 641 passed / 2 skipped / 3 deselected | 617 passed / 1 skipped / 3 deselected |
 | QML offscreen | PASS | PASS |
+| Frozen bundle | 封裝敏感 PR 條件式執行 | 封裝敏感 PR 條件式執行 |
 
-CI 綠燈只證明自動 gate；實機出聲、GUI 外觀、Windows callback 效能、打包安裝與主觀自然度仍需相應的實機／人工證據。
+封裝 gate 會在真正的 Windows EXE / macOS app bundle 中驗 QML、平台 adapter、必要內容與禁止的贅重依賴；installer、乾淨機 cold-start、實際出聲、GUI 外觀、callback 權威效能與主觀自然度仍需實機／人工證據。
 
 ## 音訊與自然度主線
 

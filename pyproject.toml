@@ -84,7 +84,7 @@ strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "tools"]
 addopts = "-q --strict-markers"
 markers = [
     "win: 需要 Windows 音訊子系統的測試",
