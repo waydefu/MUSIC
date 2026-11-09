@@ -1,11 +1,11 @@
 # AURORA 目前狀態
 
-更新：2026-11-07  
+更新：2026-11-09  
 本頁是**專案目前狀態與下一步的唯一權威入口**。歷史設計、實驗過程與舊交接保留在 `PROJECT_PLAN.md`；需要知道「現在做到哪、接下來做什麼」時，以本頁為準。
 
 ## 目前基線
 
-- 主分支：`main`；本次整理前基線 `71271ec`（PR #44）
+- 主分支：`main`；最新治理／依賴整理基線 `1cf71b7`（PR #48）
 - 正式 Release：`v0.2.0`；main 已領先正式版，尚未發布新安裝包
 - GitHub 治理：`main` 已啟用 `Protect main` ruleset
   - 必須經 Pull Request
@@ -18,13 +18,13 @@
 
 ## 最新自動化品質基準
 
-2026-11-07，PR #44：
+2026-11-09，PR #48：
 
 | Gate | Windows | macOS |
 |---|---:|---:|
 | Ruff | PASS | PASS |
 | mypy | 47 source files / 0 errors | 42 source files / 0 errors |
-| pytest | 641 passed / 2 skipped / 3 deselected | 617 passed / 1 skipped / 3 deselected |
+| pytest | 646 passed / 2 skipped / 3 deselected | 622 passed / 1 skipped / 3 deselected |
 | QML offscreen | PASS | PASS |
 | Frozen bundle | 封裝敏感 PR 條件式執行 | 封裝敏感 PR 條件式執行 |
 
