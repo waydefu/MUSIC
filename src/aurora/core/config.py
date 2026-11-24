@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
@@ -113,9 +114,19 @@ class Config:
 
     def _sanitize(self) -> None:
         """把任何不合理的值拉回合法範圍。設定檔是使用者可編輯的，不能信任。"""
-        self.volume = min(max(float(self.volume), 0.0), 1.0)
-        self.current_position = max(0.0, float(self.current_position))
-        self.font_scale = min(max(float(self.font_scale), 0.8), 1.35)
+        def finite(value: object, default: float) -> float:
+            if not isinstance(value, (int, float, str)):
+                return default
+            try:
+                number = float(value)
+            except (ValueError, OverflowError):
+                return default
+            return number if math.isfinite(number) else default
+
+        defaults = Config()
+        self.volume = min(max(finite(self.volume, defaults.volume), 0.0), 1.0)
+        self.current_position = max(0.0, finite(self.current_position, 0.0))
+        self.font_scale = min(max(finite(self.font_scale, defaults.font_scale), 0.8), 1.35)
 
         if self.repeat not in _REPEAT_MODES:
             self.repeat = "off"
@@ -143,12 +154,13 @@ class Config:
             min(max(float(value), -EQ_GAIN_LIMIT_DB), EQ_GAIN_LIMIT_DB)
             for value in self.eq_gains
             if isinstance(value, int | float)
+            and math.isfinite(finite(value, math.nan))
         ]
         self.eq_gains = gains if len(gains) == len(EQ_BAND_HZ) else [0.0] * len(EQ_BAND_HZ)
-        self.spatial_amount = min(max(float(self.spatial_amount), 0.0), 1.0)
+        self.spatial_amount = min(max(finite(self.spatial_amount, defaults.spatial_amount), 0.0), 1.0)
         self.binaural = bool(self.binaural)
         self.hrtf_profile = str(self.hrtf_profile or "")
-        self.hrtf_accuracy = min(max(float(self.hrtf_accuracy), 0.0), 1.0)
+        self.hrtf_accuracy = min(max(finite(self.hrtf_accuracy, defaults.hrtf_accuracy), 0.0), 1.0)
 
         self.window.width = max(720, int(self.window.width))
         self.window.height = max(480, int(self.window.height))
@@ -173,7 +185,7 @@ def load_config(path: Path | None = None) -> Config:
 
     try:
         return Config.from_dict(raw)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return Config()
 
 
@@ -184,11 +196,14 @@ def save_config(config: Config, path: Path | None = None) -> bool:
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary.write_text(
-            json.dumps(config.to_dict(), ensure_ascii=False, indent=2),
+            json.dumps(config.to_dict(), ensure_ascii=False, indent=2, allow_nan=False),
             encoding="utf-8",
         )
         os.replace(temporary, target)
-    except OSError:
-        temporary.unlink(missing_ok=True)
+    except (OSError, TypeError, ValueError, OverflowError):
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
         return False
     return True

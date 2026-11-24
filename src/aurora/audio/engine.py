@@ -524,7 +524,7 @@ def decode_all(path: str, sample_rate: int, channels: int = 2) -> FloatArray:
             sample_rate=sample_rate,
             frames_to_read=4096,
         )
-        next(source)
+        # stream_file 已 primed；next() 會消耗第一批 PCM。
     except (miniaudio.MiniaudioError, OSError, FileNotFoundError):
         return np.zeros(0, dtype=np.float32)
 

@@ -217,6 +217,14 @@ class SpatialUpmix:
         # 待處理緩衝要容得下「一次最大回呼 + 一個未滿的視窗」。
         self._pending = np.zeros((max_frames + fft_size, 2))
         self._pending_len = 0
+        # STFT 每 hop 重用工作區；FFT out 自 NumPy 2.0 起支援。
+        self._windowed = np.empty((fft_size, 2), dtype=np.float64)
+        self._mid_time = np.empty(fft_size, dtype=np.float64)
+        self._side_time = np.empty(fft_size, dtype=np.float64)
+        self._mid_freq = np.empty(bins, dtype=np.complex128)
+        self._side_freq = np.empty(bins, dtype=np.complex128)
+        self._synth_freq = np.empty(bins, dtype=np.complex128)
+        self._synth_time = np.empty((fft_size, 2), dtype=np.float64)
         self._overlap = np.zeros((fft_size, 2))
         # 輸出佇列要容得下預填的一個視窗、加上一次回呼可能產生的所有 hop。
         self._emitted = np.zeros((fft_size + max_frames + self._hop, 2))
@@ -418,17 +426,20 @@ class SpatialUpmix:
 
     def _advance(self) -> None:
         """處理一個 STFT 框，並吐出一個 hop 的輸出。"""
-        block = self._pending[: self._fft].copy()
+        np.multiply(self._pending[: self._fft], self._window[:, None], out=self._windowed)
         # 就地左移而不是重新配置。
         self._pending[: self._pending_len - self._hop] = self._pending[
             self._hop : self._pending_len
         ]
         self._pending_len -= self._hop
 
-        windowed = block * self._window[:, None]
-        left, right = windowed[:, 0], windowed[:, 1]
-        mid = np.fft.rfft((left + right) * 0.5, self._fft)
-        side = np.fft.rfft((left - right) * 0.5, self._fft)
+        left, right = self._windowed[:, 0], self._windowed[:, 1]
+        np.add(left, right, out=self._mid_time)
+        self._mid_time *= 0.5
+        np.subtract(left, right, out=self._side_time)
+        self._side_time *= 0.5
+        mid = np.fft.rfft(self._mid_time, self._fft, out=self._mid_freq)
+        side = np.fft.rfft(self._side_time, self._fft, out=self._side_freq)
 
         primary_mid, primary_side = self._analyse(mid, side)
         scene = self._build_scene(mid, side, primary_mid, primary_side)
@@ -437,11 +448,12 @@ class SpatialUpmix:
         else:
             out_mid, out_side = self._render_stereo(*scene, mid, side)
 
-        synth_l = np.fft.irfft(out_mid + out_side, self._fft)
-        synth_r = np.fft.irfft(out_mid - out_side, self._fft)
-        synth = np.stack([synth_l, synth_r], axis=1) * self._window[:, None]
-
-        self._overlap += synth
+        np.add(out_mid, out_side, out=self._synth_freq)
+        np.fft.irfft(self._synth_freq, self._fft, out=self._synth_time[:, 0])
+        np.subtract(out_mid, out_side, out=self._synth_freq)
+        np.fft.irfft(self._synth_freq, self._fft, out=self._synth_time[:, 1])
+        self._synth_time *= self._window[:, None]
+        self._overlap += self._synth_time
 
         # 輸出佇列：先把已消費的部分往前壓實，再附加新的一個 hop。
         if self._emit_head + self._emit_len + self._hop > self._emitted.shape[0]:

@@ -218,3 +218,32 @@ def test_hrtf_profile_coerces_junk_to_empty() -> None:
 def test_hrtf_accuracy_is_clamped() -> None:
     assert Config.from_dict({"hrtf_accuracy": 5.0}).hrtf_accuracy == 1.0
     assert Config.from_dict({"hrtf_accuracy": -1.0}).hrtf_accuracy == 0.0
+
+def test_nonfinite_effect_values_fall_back_to_defaults(tmp_path: Path) -> None:
+    target = tmp_path / "config.json"
+    target.write_text(
+        json.dumps({
+            "volume": float("nan"),
+            "font_scale": "NaN",
+            "current_position": float("inf"),
+            "spatial_amount": float("nan"),
+            "hrtf_accuracy": "-Infinity",
+            "eq_gains": [float("nan")] * len(EQ_BAND_HZ),
+        }),
+        encoding="utf-8",
+    )
+    assert load_config(target) == Config()
+
+
+def test_nonfinite_window_geometry_does_not_crash(tmp_path: Path) -> None:
+    target = tmp_path / "config.json"
+    target.write_text('{"window": {"width": Infinity}}', encoding="utf-8")
+    assert load_config(target) == Config()
+
+
+def test_save_rejects_nonfinite_without_overwriting_valid_config(tmp_path: Path) -> None:
+    target = tmp_path / "config.json"
+    assert save_config(Config(volume=0.4), target)
+    assert not save_config(Config(volume=float("nan")), target)
+    assert load_config(target).volume == 0.4
+    assert not list(tmp_path.glob("*.tmp"))

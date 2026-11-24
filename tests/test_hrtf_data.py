@@ -515,3 +515,32 @@ def test_centre_compensation_survives_exact_nulls_in_measured_data(tmp_path: Pat
     assert np.isfinite(log_magnitude).all()
     assert np.isfinite(phase).all()
     assert float(np.abs(log_magnitude).max()) <= np.log(10.0 ** (12.0 / 20.0)) + 1e-12
+
+@pytest.mark.parametrize("defect", ["empty", "nan", "inf", "rank", "rate", "azimuth", "zero"])
+def test_invalid_hrtf_arrays_fall_back(tmp_path: Path, defect: str) -> None:
+    path = tmp_path / "invalid.npz"
+    azimuths = np.array([0.0, 30.0, 110.0])
+    ipsi = np.ones((3, 16))
+    contra = ipsi.copy()
+    rate = RATE
+    if defect == "empty":
+        ipsi = contra = np.empty((3, 0))
+    elif defect == "nan":
+        ipsi[0, 0] = np.nan
+    elif defect == "inf":
+        contra[0, 0] = np.inf
+    elif defect == "rank":
+        ipsi = contra = np.ones((3, 2, 8))
+    elif defect == "rate":
+        rate = 1
+    elif defect == "azimuth":
+        azimuths[0] = np.nan
+    elif defect == "zero":
+        ipsi[0] = 0.0
+    np.savez(path, sample_rate=rate, azimuths=azimuths, ipsi=ipsi, contra=contra)
+    assert load_filters(RATE, FFT, path) is None
+
+
+@pytest.mark.parametrize("name", ["../outside", "..\\outside", "/absolute", "C:outside"])
+def test_profile_name_cannot_escape_profile_directory(name: str) -> None:
+    assert hrtf_module.profile_path(name) is None

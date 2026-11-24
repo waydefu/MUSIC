@@ -485,7 +485,7 @@ def available_profiles() -> tuple[str, ...]:
 
 def profile_path(name: str) -> Path | None:
     """profile 名稱對應的檔案。找不到回傳 ``None``。"""
-    if not name or name == SYNTHETIC_PROFILE:
+    if not name or name == SYNTHETIC_PROFILE or any(c in name for c in ("/", "\\", "\x00", ":")):
         return None
     try:
         candidate = hrtf_dir() / f"{name}.npz"
@@ -539,12 +539,28 @@ def load_filters(sample_rate: int, fft_size: int, path: Path | None = None) -> H
         # 檔案壞掉、不是 npz、numpy 版本不合 —— 一律當成沒有這個檔案。
         return None
 
-    if source_rate <= 0 or ipsi.shape != contra.shape or ipsi.shape[0] != azimuths.size:
+    if (
+        source_rate <= 0
+        or sample_rate <= 0
+        or fft_size <= 0
+        or azimuths.ndim != 1
+        or not azimuths.size
+        or ipsi.ndim != 2
+        or not ipsi.size
+        or ipsi.shape != contra.shape
+        or ipsi.shape[0] != azimuths.size
+        or not np.isfinite(azimuths).all()
+        or not np.isfinite(ipsi).all()
+        or not np.isfinite(contra).all()
+    ):
         return None
     # 長度上限要在**重取樣之後**檢查：上限的意義是「不能超過 STFT 視窗的
     # 一定比例」，而視窗是以引擎取樣率的樣本數計的。以前拿原始長度比，
     # 44.1k→48k 的 512 抽頭變成 557、48k→192k 變成 2048（整個視窗）都照收。
     limit = fft_size * HRTF_MAX_TAP_RATIO
+    # 在 FFT 配置之前先驗證重取樣後的長度，避免異常取樣率造成巨大配置。
+    if max(1, round(ipsi.shape[1] * sample_rate / source_rate)) > limit:
+        return None
 
     def pair_at(azimuth: float) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]] | None:
         # 資料集的量測格點不一定剛好落在 30°／110°，取最近的一個。
@@ -559,9 +575,12 @@ def load_filters(sample_rate: int, fft_size: int, path: Path | None = None) -> H
             return None
         return near, far
 
-    centre = pair_at(0.0)
-    front = pair_at(HRTF_FRONT_AZIMUTH_DEG)
-    surround = pair_at(HRTF_SURROUND_AZIMUTH_DEG)
+    try:
+        centre = pair_at(0.0)
+        front = pair_at(HRTF_FRONT_AZIMUTH_DEG)
+        surround = pair_at(HRTF_SURROUND_AZIMUTH_DEG)
+    except (ValueError, ArithmeticError, MemoryError):
+        return None
     if centre is None or front is None or surround is None:
         return None
 
@@ -572,6 +591,8 @@ def load_filters(sample_rate: int, fft_size: int, path: Path | None = None) -> H
     # 所有濾波器乘上**同一個**相位斜坡（環形平移），方向線索（兩耳之間、
     # 喇叭之間的相對時序）完全不變；比置中更早到的近耳因此落在負時間，
     # 與合成模型的慣例一致（它的近耳本來就是 −半個 ITD）。
+    if not np.any(centre[0]):
+        return None
     align = int(np.argmax(np.abs(centre[0])))
     advance = np.exp(2j * np.pi * np.arange(fft_size // 2 + 1) * align / fft_size)
 
@@ -584,6 +605,9 @@ def load_filters(sample_rate: int, fft_size: int, path: Path | None = None) -> H
             front=(spectrum(front[0]), spectrum(front[1])),
             surround=(spectrum(surround[0]), spectrum(surround[1])),
         )
-    except ValueError:
+        equalised = filters.layout_equalised()
+        if not all(np.isfinite(response).all() for response in equalised.ear_responses()):
+            return None
+        return equalised
+    except (ValueError, ArithmeticError, MemoryError):
         return None
-    return filters.layout_equalised()

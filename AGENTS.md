@@ -5,7 +5,7 @@
 
 ## 這個倉庫是什麼
 
-**Windows 專屬**的桌面音樂播放器（AURORA 極光播放器）。
+以 Windows 為主要發行平台、另有 macOS 平台實作的桌面音樂播放器（AURORA 極光播放器）。
 Python 3.11 + PySide6／Qt Quick（QML）介面，miniaudio 播放層，mutagen 讀標籤，
 numpy 做 FFT／音質分析。uv 管相依，PyInstaller `onedir` 打包，PowerShell 腳本安裝。
 授權 GPL-3.0（由 mutagen 與 PySide6 的相依授權決定，不是偏好）。
@@ -69,7 +69,7 @@ numpy 做 FFT／音質分析。uv 管相依，PyInstaller `onedir` 打包，Powe
    ANSI 代碼頁（繁中是 cp950）解讀，安裝腳本 100% 解析失敗。`make_release.py` 會擋。
 9. **檔案關聯只寫 `HKCU`，而且是「加入開啟方式」不是搶佔預設。** 不提權、不碰 `HKLM`。
    Windows 10 之後不允許程式自行設為預設處理常式，別嘗試繞過。
-10. **DSP 處理器跑在音訊回呼上，不得配置記憶體、不得發 Qt signal。**
+10. **DSP 處理器跑在音訊回呼上，不得新增可避免的穩態記憶體配置、不得發 Qt signal。**
     穩態配置會在回呼裡觸發 GC，那正是尾端延遲的來源（`dsp_graph` 的契約有
     寫，`bench_callback.py` 會量）。要回報狀態就設旗標，由
     `PlayerController._tick()` 在主執行緒撈出來 —— 與 `take_finished` 同一個
@@ -163,5 +163,5 @@ QML 的 `--validate-qml` 只證明「載得起來」，**不證明畫面正確**
 - **文件語言維持繁體中文**，與既有 README／ARCHITECTURE／程式碼註解一致。
 - **註解解釋「為什麼」。** 本倉庫的既有註解密度高且都在講權衡與踩過的坑；
   新增註解請沿用這個風格，不要寫覆述程式碼的廢話。
-- Windows 專屬程式碼放 `platform_win/`；macOS／Linux 目前**沒有**平台層實作，
-  不要在共用層假設它存在。
+- Windows 專屬程式碼放 `platform_win/`；macOS 實作放 `platform/macos.py`。
+  共用層透過 `platform/` 契約，不假設任何特定平台能力；Linux 尚非正式驗收平台。

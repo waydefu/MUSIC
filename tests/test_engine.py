@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import shutil
+import wave
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -66,6 +67,19 @@ def test_all_supported_formats_decode(generated_dir: Path, name: str) -> None:
     samples = decode_all(str(generated_dir / name), RATE)
     # 12 秒 × 44100 × 2 聲道，容許編碼器在頭尾補靜音
     assert samples.size == pytest.approx(12 * RATE * 2, rel=0.05)
+
+
+def test_decode_all_preserves_first_and_last_pcm_frames(tmp_path: Path) -> None:
+    path = tmp_path / "完整 PCM.wav"
+    frames = 8197
+    pcm = np.arange(frames * 2, dtype=np.int16).reshape(frames, 2)
+    with wave.open(str(path), "wb") as output:
+        output.setnchannels(2)
+        output.setsampwidth(2)
+        output.setframerate(RATE)
+        output.writeframes(pcm.astype("<i2").tobytes())
+    expected = pcm.reshape(-1).astype(np.float32) / 32768.0
+    np.testing.assert_array_equal(decode_all(str(path), RATE), expected)
 
 
 # ------------------------------------------------------------------ 播放位置

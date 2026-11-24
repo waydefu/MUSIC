@@ -29,6 +29,8 @@ DSP graph 一致。
 
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from aurora.audio.engine import AudioEngine
@@ -130,7 +132,7 @@ class AudioFxController(QObject):
 
     @Slot(int, float)
     def setBandGain(self, index: int, gain_db: float) -> None:
-        if not 0 <= index < len(EQ_BAND_HZ):
+        if not 0 <= index < len(EQ_BAND_HZ) or not math.isfinite(gain_db):
             return
         gains = list(self._config.eq_gains)
         gains[index] = gain_db
@@ -207,7 +209,7 @@ class AudioFxController(QObject):
 
     @Slot(float)
     def setHrtfAccuracy(self, value: float) -> None:
-        if abs(value - self._spatial.cue_strength) < 1e-6:
+        if not math.isfinite(value) or abs(value - self._spatial.cue_strength) < 1e-6:
             return
         self._spatial.cue_strength = value
         self._reflections.cue_strength = self._spatial.cue_strength
@@ -229,7 +231,7 @@ class AudioFxController(QObject):
 
     @Slot(float)
     def setSpatialAmount(self, amount: float) -> None:
-        if abs(amount - self._spatial.amount) < 1e-6:
+        if not math.isfinite(amount) or abs(amount - self._spatial.amount) < 1e-6:
             return
         self._spatial.amount = amount
         self._reflections.amount = self._spatial.amount
