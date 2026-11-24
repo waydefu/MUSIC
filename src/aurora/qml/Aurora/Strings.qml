@@ -32,6 +32,7 @@ QtObject {
     readonly property string binauralHint: "模擬聲音繞過頭部到達兩耳的時間差與音量差，讓空間音效聽起來像在頭外面。給耳機用；喇叭不需要。"
     readonly property string binauralSynthetic: "目前用內建的球形頭模型：有左右與遠近感，但沒有耳廓，前後分不太出來。"
     readonly property string binauralMeasured: "目前用你匯入的實測 HRTF 資料。"
+    readonly property string binauralFallback: "選定的實測資料未能完整載入；至少一級使用內建合成模型。"
     readonly property string hrtfProfile: "HRTF 設定檔"
     readonly property string hrtfProfileSynthetic: "內建合成模型"
     readonly property string hrtfAccuracy: "空間精準度"

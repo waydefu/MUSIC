@@ -373,3 +373,35 @@ def test_spatial_accuracy_reaches_the_processor_and_the_config(fx: object) -> No
     controller.setHrtfAccuracy(0.5)
     assert controller.hrtfAccuracy == pytest.approx(0.5)
     assert config.hrtf_accuracy == pytest.approx(0.5)
+
+def test_linked_spatial_controls_publish_as_one_block(fx: object, monkeypatch) -> None:
+    """模擬 UI 在兩個 stage 中間更新：當前回呼仍須使用舊的一整組。"""
+    import numpy as np
+
+    controller, engine, _ = fx
+    controller.setSpatialAmount(0.5)
+    spatial, reflections = engine.graph.stages[1:3]
+    observed = []
+    spatial_original = spatial._process_snapshot
+    reflections_original = reflections._process_snapshot
+
+    def spatial_probe(request, state, buf):
+        observed.append(("spatial", request[0], state is not None))
+        spatial_original(request, state, buf)
+        if len(observed) == 1:
+            controller.setSpatialAmount(0.75)
+            controller.setBinauralEnabled(True)
+
+    def reflections_probe(request, state, buf):
+        observed.append(("reflections", request[0], state is not None))
+        reflections_original(request, state, buf)
+
+    monkeypatch.setattr(spatial, "_process_snapshot", spatial_probe)
+    monkeypatch.setattr(reflections, "_process_snapshot", reflections_probe)
+    engine.graph.publish_controls()
+    engine.graph.process(np.zeros(1024, dtype=np.float32))
+    assert not engine.graph.degraded
+    assert observed == [("spatial", 0.5, False), ("reflections", 0.5, False)]
+    engine.graph.process(np.zeros(1024, dtype=np.float32))
+    assert not engine.graph.degraded
+    assert observed[2:] == [("spatial", 0.75, True), ("reflections", 0.75, True)]

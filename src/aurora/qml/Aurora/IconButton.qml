@@ -23,6 +23,17 @@ Item {
 
     signal clicked()
 
+    activeFocusOnTab: enabled && visible
+    Accessible.role: Accessible.Button
+    Accessible.name: tooltip || icon
+    Accessible.onPressAction: if (root.enabled) root.clicked()
+    Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            if (!event.isAutoRepeat) root.clicked()
+            event.accepted = true
+        }
+    }
+
     implicitWidth: 44
     implicitHeight: 44
 
@@ -48,6 +59,15 @@ Item {
                 easing.bezierCurve: Motion.standard
             }
         }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        radius: width / 2
+        color: "transparent"
+        border.color: root.color
+        border.width: 2
+        visible: root.activeFocus
     }
 
     // 啟用狀態的外光暈
@@ -387,6 +407,9 @@ Item {
     MouseArea {
         id: mouse
         anchors.fill: parent
-        onClicked: root.clicked()
+        onClicked: {
+            root.forceActiveFocus(Qt.MouseFocusReason)
+            root.clicked()
+        }
     }
 }

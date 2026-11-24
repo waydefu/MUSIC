@@ -29,6 +29,8 @@ DSP graph 一致。
 
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from aurora.audio.engine import AudioEngine
@@ -74,6 +76,7 @@ class AudioFxController(QObject):
         self._reflections = EarlyReflections()
         self._limiter = Limiter()
         self._meter = OutputMeter()
+        self._engine.graph.set_snapshot_processors((self._spatial, self._reflections))
 
         # **設定檔是增益的唯一真相來源，處理器不是。** 停用時處理器會被填成
         # 全平（否則 graph 裡還是會跑 FFT），這時若從處理器讀值，UI 的滑桿
@@ -130,7 +133,7 @@ class AudioFxController(QObject):
 
     @Slot(int, float)
     def setBandGain(self, index: int, gain_db: float) -> None:
-        if not 0 <= index < len(EQ_BAND_HZ):
+        if not 0 <= index < len(EQ_BAND_HZ) or not math.isfinite(gain_db):
             return
         gains = list(self._config.eq_gains)
         gains[index] = gain_db
@@ -160,6 +163,7 @@ class AudioFxController(QObject):
         self._spatial.binaural = bool(enabled)
         self._reflections.binaural = self._spatial.binaural
         self._config.binaural = self._spatial.binaural
+        self._engine.graph.publish_controls()
         self.spatialChanged.emit()
 
     @Property(list, notify=spatialChanged)
@@ -185,7 +189,7 @@ class AudioFxController(QObject):
 
     @Property(str, notify=spatialChanged)
     def hrtfProfile(self) -> str:
-        """目前實際生效的 profile 名稱。"""
+        """選定的 profile（自動時為候選）；是否成功載入另由狀態屬性回報。"""
         return self._active_profile()
 
     @Slot(str)
@@ -198,6 +202,7 @@ class AudioFxController(QObject):
         self._config.hrtf_profile = name
         self._spatial.hrtf_profile = name
         self._reflections.hrtf_profile = name
+        self._engine.graph.publish_controls()
         self.spatialChanged.emit()
 
     @Property(float, notify=spatialChanged)
@@ -207,11 +212,12 @@ class AudioFxController(QObject):
 
     @Slot(float)
     def setHrtfAccuracy(self, value: float) -> None:
-        if abs(value - self._spatial.cue_strength) < 1e-6:
+        if not math.isfinite(value) or abs(value - self._spatial.cue_strength) < 1e-6:
             return
         self._spatial.cue_strength = value
         self._reflections.cue_strength = self._spatial.cue_strength
         self._config.hrtf_accuracy = self._spatial.cue_strength
+        self._engine.graph.publish_controls()
         self.spatialChanged.emit()
 
     @Property(bool, notify=spatialChanged)
@@ -221,7 +227,17 @@ class AudioFxController(QObject):
         UI 必須照實顯示。合成模型沒有耳廓，做不出可靠的前後區分 ——
         讓它冒充完成品，使用者只會覺得功能壞了。
         """
-        return self._spatial.hrtf_is_measured
+        return self._spatial.hrtf_is_measured and self._reflections.hrtf_is_measured
+
+    @Property(bool, notify=spatialChanged)
+    def hrtfFallback(self) -> bool:
+        """使用者選了實測 profile，但已啟用的空間級聯未完整載入。"""
+        return (
+            self._spatial.amount > 0.0
+            and self._spatial.binaural
+            and self._active_profile() != SYNTHETIC_PROFILE
+            and not (self._spatial.hrtf_is_measured and self._reflections.hrtf_is_measured)
+        )
 
     @Property(float, notify=spatialChanged)
     def spatialAmount(self) -> float:
@@ -229,7 +245,7 @@ class AudioFxController(QObject):
 
     @Slot(float)
     def setSpatialAmount(self, amount: float) -> None:
-        if abs(amount - self._spatial.amount) < 1e-6:
+        if not math.isfinite(amount) or abs(amount - self._spatial.amount) < 1e-6:
             return
         self._spatial.amount = amount
         self._reflections.amount = self._spatial.amount

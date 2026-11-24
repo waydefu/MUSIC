@@ -68,6 +68,8 @@ Goodwin／Jot 那一路的做法）：
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
+from functools import partial
 
 import numpy as np
 import numpy.typing as npt
@@ -146,7 +148,9 @@ class SpatialUpmix:
         if fft_size % hop != 0 or fft_size // hop != 2:
             raise ValueError("目前只支援 50% 重疊（fft_size 必須是 hop 的兩倍）")
         self._base_fft = fft_size
-        self._amount = 0.0
+        self._amount = 0.0  # audio-thread effective value
+        self._amount_request = (0.0, 0)
+        self._amount_epoch = 0
         self._surround = SPATIAL_SURROUND_LEVEL
         self._depth_db = SPATIAL_DEPTH_DB
         self._width = SPATIAL_WIDTH
@@ -183,6 +187,10 @@ class SpatialUpmix:
         self._smoothed_m = np.zeros(bins)
         self._smoothed_s = np.zeros(bins)
         self._smoothed_cross = np.zeros(bins, dtype=np.complex128)
+        self._power_work = np.empty(bins, dtype=np.float64)
+        self._cross_work = np.empty(bins, dtype=np.complex128)
+        self._weighted_cumsum = np.zeros(bins + 1, dtype=np.float64)
+        self._power_cumsum = np.zeros(bins + 1, dtype=np.float64)
         self._makeup = 1.0
 
         # 雙耳 renderer 的環繞饋給。P1 折回立體聲時 SL/SR 是 ±u（完全反相），
@@ -217,6 +225,14 @@ class SpatialUpmix:
         # 待處理緩衝要容得下「一次最大回呼 + 一個未滿的視窗」。
         self._pending = np.zeros((max_frames + fft_size, 2))
         self._pending_len = 0
+        # STFT 每 hop 重用工作區；FFT out 自 NumPy 2.0 起支援。
+        self._windowed = np.empty((fft_size, 2), dtype=np.float64)
+        self._mid_time = np.empty(fft_size, dtype=np.float64)
+        self._side_time = np.empty(fft_size, dtype=np.float64)
+        self._mid_freq = np.empty(bins, dtype=np.complex128)
+        self._side_freq = np.empty(bins, dtype=np.complex128)
+        self._synth_freq = np.empty(bins, dtype=np.complex128)
+        self._synth_time = np.empty((fft_size, 2), dtype=np.float64)
         self._overlap = np.zeros((fft_size, 2))
         # 輸出佇列要容得下預填的一個視窗、加上一次回呼可能產生的所有 hop。
         self._emitted = np.zeros((fft_size + max_frames + self._hop, 2))
@@ -227,17 +243,18 @@ class SpatialUpmix:
 
     @property
     def amount(self) -> float:
-        return self._amount
+        return self._amount_request[0]
 
     @amount.setter
     def amount(self, value: float) -> None:
+        if not math.isfinite(value):
+            return
         amount = float(np.clip(value, 0.0, 1.0))
-        # 從關到開時緩衝裡是它上次開著時的舊東西，不重設會少掉預填的靜音、
-        # 前一個視窗的輸出也會錯位。**先重設、再改 amount**：amount 還是 0 時
-        # 回呼一碰到 process 就直接返回，不會與這裡的重設同時動到 buffer。
-        if amount > 1e-6 and not self.active and self._ready:
-            self.reset()
-        self._amount = amount
+        previous, epoch = self._amount_request
+        if amount > 1e-6 and previous <= 1e-6:
+            epoch += 1
+        # 只發布不可變設定；reset 由音訊執行緒執行，避免與舊 block 競爭。
+        self._amount_request = (amount, epoch)
 
     @property
     def binaural(self) -> bool:
@@ -253,6 +270,9 @@ class SpatialUpmix:
         self._binaural = bool(value)
         if self._binaural and self._sample_rate:
             self._load_hrtf(self._sample_rate)
+        elif not self._binaural:
+            self._binaural_state = None
+            self._hrtf_measured = False
 
     @property
     def hrtf_is_measured(self) -> bool:
@@ -334,7 +354,7 @@ class SpatialUpmix:
 
     @property
     def active(self) -> bool:
-        return self._amount > 1e-6 and self._ready
+        return self.amount > 1e-6 and self._ready
 
     # ------------------------------------------------------------ AudioProcessor
 
@@ -380,9 +400,25 @@ class SpatialUpmix:
         """
         return 0 if not self.active else self._fft
 
+    def snapshot_process(self) -> Callable[[FloatArray], None]:
+        return partial(self._process_snapshot, self._amount_request, self._binaural_state)
+
     def process(self, buf: FloatArray) -> None:
-        if not self.active:
+        self._process_snapshot(self._amount_request, self._binaural_state, buf)
+
+    def _process_snapshot(
+        self, request: tuple[float, int], state: BinauralState | None, buf: FloatArray
+    ) -> None:
+        amount, epoch = request
+        if amount <= 1e-6 or not self._ready:
             return
+        if epoch != self._amount_epoch:
+            self.reset()
+            self._amount_epoch = epoch
+        self._amount = amount
+        self._process_active(buf, state)
+
+    def _process_active(self, buf: FloatArray, state: BinauralState | None) -> None:
         frames = buf.size // self._channels
         if frames == 0:
             return
@@ -392,13 +428,13 @@ class SpatialUpmix:
             # 回呼比 prepare 宣告的還大時分批做，而不是在回呼裡重新配置。
             step = self._pending.shape[0] - self._fft
             for start in range(0, buf.size, step * self._channels):
-                self.process(buf[start : start + step * self._channels])
+                self._process_active(buf[start : start + step * self._channels], state)
             return
         self._pending[self._pending_len : self._pending_len + frames] = view
         self._pending_len += frames
 
         while self._pending_len >= self._fft:
-            self._advance()
+            self._advance(state)
 
         # 預填保證了這裡永遠取得到，但仍留一條安全路徑：真的不夠時把靜音
         # 補在**前面**（等同多一點延遲），而不是補在後面 —— 補後面會把
@@ -416,32 +452,36 @@ class SpatialUpmix:
 
     # ------------------------------------------------------------ 內部
 
-    def _advance(self) -> None:
+    def _advance(self, state: BinauralState | None) -> None:
         """處理一個 STFT 框，並吐出一個 hop 的輸出。"""
-        block = self._pending[: self._fft].copy()
+        np.multiply(self._pending[: self._fft], self._window[:, None], out=self._windowed)
         # 就地左移而不是重新配置。
         self._pending[: self._pending_len - self._hop] = self._pending[
             self._hop : self._pending_len
         ]
         self._pending_len -= self._hop
 
-        windowed = block * self._window[:, None]
-        left, right = windowed[:, 0], windowed[:, 1]
-        mid = np.fft.rfft((left + right) * 0.5, self._fft)
-        side = np.fft.rfft((left - right) * 0.5, self._fft)
+        left, right = self._windowed[:, 0], self._windowed[:, 1]
+        np.add(left, right, out=self._mid_time)
+        self._mid_time *= 0.5
+        np.subtract(left, right, out=self._side_time)
+        self._side_time *= 0.5
+        mid = np.fft.rfft(self._mid_time, self._fft, out=self._mid_freq)
+        side = np.fft.rfft(self._side_time, self._fft, out=self._side_freq)
 
         primary_mid, primary_side = self._analyse(mid, side)
         scene = self._build_scene(mid, side, primary_mid, primary_side)
-        if self._binaural and self._binaural_state is not None:
-            out_mid, out_side = self._render_binaural(*scene, mid, side)
+        if state is not None:
+            out_mid, out_side = self._render_binaural(*scene, mid, side, state)
         else:
             out_mid, out_side = self._render_stereo(*scene, mid, side)
 
-        synth_l = np.fft.irfft(out_mid + out_side, self._fft)
-        synth_r = np.fft.irfft(out_mid - out_side, self._fft)
-        synth = np.stack([synth_l, synth_r], axis=1) * self._window[:, None]
-
-        self._overlap += synth
+        np.add(out_mid, out_side, out=self._synth_freq)
+        np.fft.irfft(self._synth_freq, self._fft, out=self._synth_time[:, 0])
+        np.subtract(out_mid, out_side, out=self._synth_freq)
+        np.fft.irfft(self._synth_freq, self._fft, out=self._synth_time[:, 1])
+        self._synth_time *= self._window[:, None]
+        self._overlap += self._synth_time
 
         # 輸出佇列：先把已消費的部分往前壓實，再附加新的一個 hop。
         if self._emit_head + self._emit_len + self._hop > self._emitted.shape[0]:
@@ -482,9 +522,17 @@ class SpatialUpmix:
         像有東西在呼吸。平滑係數見 :data:`SPATIAL_COHERENCE_SMOOTHING`。
         """
         alpha = self._smoothing
-        self._smoothed_m = alpha * self._smoothed_m + (1.0 - alpha) * np.abs(mid) ** 2
-        self._smoothed_s = alpha * self._smoothed_s + (1.0 - alpha) * np.abs(side) ** 2
-        self._smoothed_cross = alpha * self._smoothed_cross + (1.0 - alpha) * (mid * np.conj(side))
+        for smoothed, channel in ((self._smoothed_m, mid), (self._smoothed_s, side)):
+            np.abs(channel, out=self._power_work)
+            np.square(self._power_work, out=self._power_work)
+            self._power_work *= 1.0 - alpha
+            smoothed *= alpha
+            smoothed += self._power_work
+        np.conj(side, out=self._cross_work)
+        self._cross_work *= mid
+        self._cross_work *= 1.0 - alpha
+        self._smoothed_cross *= alpha
+        self._smoothed_cross += self._cross_work
 
         a, b, x = self._smoothed_m, self._smoothed_s, self._smoothed_cross
         half_gap = 0.5 * (a - b)
@@ -599,6 +647,7 @@ class SpatialUpmix:
         ambience_side: ComplexArray,
         dry_mid: ComplexArray,
         dry_side: ComplexArray,
+        state: BinauralState,
     ) -> tuple[ComplexArray, ComplexArray]:
         """HRTF Renderer：把同一個場景改用頭部轉移函數送到兩耳。
 
@@ -629,8 +678,6 @@ class SpatialUpmix:
         時那就是原訊號，天然透明），但 HRTF 會改變 side 的頻譜，
         不淡入的話 ``amount=0`` 就不再是旁通了。
         """
-        state = self._binaural_state
-        assert state is not None  # 呼叫端已經檢查過
         hrtf, log_magnitude, phase = state
         amount = self._amount
         gain, width, depth = self._wet_coefficients()
@@ -652,8 +699,11 @@ class SpatialUpmix:
         # 每一格各自算的話相鄰格的 ``w`` 差很多，相位在頻率方向上亂跳，脈衝
         # 響應鋪滿視窗而繞回負時間 —— 實測擴散瞬態前的能量被抬到 −15 dB。
         # 見 :data:`SPATIAL_CENTRE_SMOOTHING_OCTAVE`。
-        weighted = np.concatenate(([0.0], np.cumsum(centred * power)))
-        total = np.concatenate(([0.0], np.cumsum(power)))
+        weighted = self._weighted_cumsum
+        total = self._power_cumsum
+        np.multiply(centred, power, out=self._power_work)
+        np.cumsum(self._power_work, out=weighted[1:])
+        np.cumsum(power, out=total[1:])
         low, high = self._weight_low, self._weight_high
         weight = (weighted[high] - weighted[low]) / np.maximum(total[high] - total[low], _EPS)
         shared = np.exp(weight * (log_magnitude + 1j * phase))

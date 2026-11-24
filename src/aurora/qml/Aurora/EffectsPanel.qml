@@ -433,7 +433,11 @@ Item {
                     stepSize: 0.05
                     snapMode: Slider.SnapAlways
                     value: root.controller ? root.controller.hrtfAccuracy : 1.0
-                    onMoved: if (root.controller) root.controller.setHrtfAccuracy(value)
+                    // 拖曳中只預覽數值；釋放時才重建 HRTF。鍵盤仍立即套用。
+                    onMoved: if (!pressed && root.controller)
+                        root.controller.setHrtfAccuracy(value)
+                    onPressedChanged: if (!pressed && root.controller)
+                        root.controller.setHrtfAccuracy(value)
                 }
 
                 Text {
@@ -450,9 +454,10 @@ Item {
                 Text {
                     width: parent.width
                     visible: root.controller ? root.controller.binauralEnabled : false
-                    text: (root.controller && root.controller.hrtfIsMeasured)
-                        ? Strings.binauralMeasured
-                        : Strings.binauralSynthetic
+                    text: root.controller && root.controller.hrtfFallback
+                        ? Strings.binauralFallback
+                        : (root.controller && root.controller.hrtfIsMeasured
+                            ? Strings.binauralMeasured : Strings.binauralSynthetic)
                     color: (root.controller && root.controller.hrtfIsMeasured)
                         ? root.accent
                         : Qt.rgba(1, 1, 1, 0.42)

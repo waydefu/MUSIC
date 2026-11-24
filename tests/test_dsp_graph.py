@@ -337,6 +337,10 @@ def test_stage_that_comes_back_is_reset_not_reprepared() -> None:
     graph.set_stages((stage,))
 
     assert stage.prepared is None
+    assert stage.resets == 0
+    graph.process(np.zeros(16, dtype=np.float32))
+    assert stage.resets == 1
+    graph.process(np.zeros(16, dtype=np.float32))
     assert stage.resets == 1
 
 
@@ -462,3 +466,24 @@ def test_engine_pump_survives_graph_states(flac_path: Path, bypass: bool) -> Non
     assert engine.pump(1024) > 0
     assert not engine.graph.degraded
     engine.close()
+
+def test_republishing_stage_never_resets_inside_inflight_block() -> None:
+    graph = DspGraph()
+    graph.prepare(RATE, 2, 64)
+
+    class RepublishingGain(Gain):
+        def process(self, buf: np.ndarray) -> None:
+            if self.resets == 0:
+                graph.set_stages(())
+                graph.set_stages((self,))
+                assert self.resets == 0
+            super().process(buf)
+
+    stage = RepublishingGain(1.0)
+    graph.set_stages((stage,))
+    graph.process(np.ones(16, dtype=np.float32))
+    assert not graph.degraded
+    assert stage.resets == 0
+    graph.process(np.ones(16, dtype=np.float32))
+    assert not graph.degraded
+    assert stage.resets == 1

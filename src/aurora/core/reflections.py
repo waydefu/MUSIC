@@ -88,6 +88,8 @@ D/R 控制（``core/spatial.py`` 的 depth）已經能把直達聲往後推，�
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
+from functools import partial
 
 import numpy as np
 import numpy.typing as npt
@@ -147,7 +149,9 @@ class EarlyReflections:
     """
 
     def __init__(self) -> None:
-        self._amount = 0.0
+        self._amount = 0.0  # audio-thread effective value
+        self._amount_request = (0.0, 0)
+        self._amount_epoch = 0
         self._level = REFLECTION_LEVEL
         self._channels = 0
         self._sample_rate = 0
@@ -179,17 +183,18 @@ class EarlyReflections:
 
     @property
     def amount(self) -> float:
-        return self._amount
+        return self._amount_request[0]
 
     @amount.setter
     def amount(self, value: float) -> None:
+        if not math.isfinite(value):
+            return
         amount = float(np.clip(value, 0.0, 1.0))
-        # 關著的時候延遲線不會前進，裡面留的是上次開著時的音訊 —— 從關到開
-        # 不清的話，前 23 ms 的反射會是不知道多久以前的內容。**先清、再改
-        # amount**：amount 還是 0 時回呼一碰到 process 就返回，不會同時動到它。
-        if amount > 1e-6 and not self.active:
-            self.reset()
-        self._amount = amount
+        previous, epoch = self._amount_request
+        if amount > 1e-6 and previous <= 1e-6:
+            epoch += 1
+        # 只發布不可變設定；reset 由音訊執行緒執行，避免與舊 block 競爭。
+        self._amount_request = (amount, epoch)
 
     @property
     def level(self) -> float:
@@ -242,7 +247,7 @@ class EarlyReflections:
 
     @property
     def active(self) -> bool:
-        return self._amount > 1e-6 and self._channels == 2 and self._line is not None
+        return self.amount > 1e-6 and self._channels == 2 and self._line is not None
 
     # ------------------------------------------------------------ AudioProcessor
 
@@ -276,6 +281,9 @@ class EarlyReflections:
         self._summed = np.zeros((self._capacity, channels))
         self._feed = np.zeros((self._capacity, channels))
         self._pad = np.zeros((longest + self._capacity, channels))
+        self._fft_input = np.zeros(self._nfft, dtype=np.float64)
+        self._fft_spectrum = np.empty(self._nfft // 2 + 1, dtype=np.complex128)
+        self._fft_output = np.empty(self._nfft, dtype=np.float64)
         self._build_binaural_kernels()
 
     def _build_binaural_kernels(self) -> None:
@@ -357,9 +365,22 @@ class EarlyReflections:
         """
         return 0
 
+    def snapshot_process(self) -> Callable[[FloatArray], None]:
+        return partial(self._process_snapshot, self._amount_request, self._binaural_kernels)
+
     def process(self, buf: FloatArray) -> None:
-        if not self.active or self._line is None or self._tail is None:
+        self._process_snapshot(self._amount_request, self._binaural_kernels, buf)
+
+    def _process_snapshot(
+        self, request: tuple[float, int], binaural: Kernels | None, buf: FloatArray
+    ) -> None:
+        amount, epoch = request
+        if amount <= 1e-6 or self._line is None or self._tail is None:
             return
+        if epoch != self._amount_epoch:
+            self.reset()
+            self._amount_epoch = epoch
+        self._amount = amount
         frames = buf.size // self._channels
         if frames == 0:
             return
@@ -370,10 +391,10 @@ class EarlyReflections:
         start = 0
         while start < frames:
             stop = min(start + self._capacity, frames)
-            self._process_block(view[start:stop])
+            self._process_block(view[start:stop], binaural)
             start = stop
 
-    def _process_block(self, view: npt.NDArray[np.float32]) -> None:
+    def _process_block(self, view: npt.NDArray[np.float32], binaural: Kernels | None) -> None:
         assert self._line is not None and self._tail is not None
         frames = view.shape[0]
         capacity = self._line.shape[0]
@@ -385,7 +406,6 @@ class EarlyReflections:
         # 2. 讀出兩個抽頭。時間差就是空間尺度。
         summed = self._summed[:frames]
         summed.fill(0.0)
-        binaural = self._binaural_kernels
         for order, delay in enumerate(self._delays):
             taps = (self._write - delay + np.arange(frames)) % capacity
             echo = self._line[taps]
@@ -477,7 +497,12 @@ class EarlyReflections:
             pad = self._pad[: overlap + frames, channel]
             pad[:overlap] = tail[:, channel]
             pad[overlap:] = signal[:, channel]
-            full = np.fft.irfft(np.fft.rfft(pad, self._nfft) * spectrum, self._nfft)
-            signal[:, channel] = full[overlap : overlap + frames]
+            used = overlap + frames
+            self._fft_input[:used] = pad
+            self._fft_input[used:] = 0.0
+            np.fft.rfft(self._fft_input, out=self._fft_spectrum)
+            self._fft_spectrum *= spectrum
+            np.fft.irfft(self._fft_spectrum, n=self._nfft, out=self._fft_output)
+            signal[:, channel] = self._fft_output[overlap:used]
             tail[:, channel] = pad[frames:]
         return signal

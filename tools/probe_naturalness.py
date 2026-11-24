@@ -18,7 +18,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import miniaudio
 import numpy as np
@@ -38,7 +38,7 @@ from aurora.core.dynamics import Limiter, OutputMeter
 from aurora.core.hrtf import SYNTHETIC_PROFILE, resolve_profile
 from aurora.core.rates import scaled_fft_size, scaled_taps
 from aurora.core.reflections import EarlyReflections
-from aurora.core.spatial import SpatialUpmix
+from aurora.core.spatial import ComplexArray, SpatialUpmix
 
 Audio = npt.NDArray[np.float32]
 GainEnvelope = npt.NDArray[np.float32]
@@ -70,6 +70,10 @@ class Arm:
     reflection_amount: float = 0.0
     depth_db: float = SPATIAL_DEPTH_DB
     reflection_scale: float = 1.0
+    spatial_mode: Literal["current", "decomposition", "ambient", "hrtf", "decomposition_hrtf"] = (
+        "current"
+    )
+    adaptive_makeup: bool = True
 
 
 ARMS = (
@@ -84,6 +88,78 @@ ARMS = (
     Arm("full_100_no_depth", 1.0, 1.0, depth_db=0.0),
     Arm("full_100_half_reflections", 1.0, 1.0, reflection_scale=0.5),
 )
+
+
+# R3 不改產品參數；每個實驗臂明確定義訊號路徑，不能把無反射誤標成 HRTF-only。
+R3_ARMS = (
+    ARMS[0],
+    ARMS[1],
+    ARMS[2],
+    ARMS[3],
+    ARMS[4],
+    ARMS[5],
+    ARMS[6],
+    ARMS[7],
+    Arm("r3_decomposition_depth_only", 1.0, spatial_mode="decomposition", adaptive_makeup=False),
+    Arm("r3_ambient_surround_only", 1.0, spatial_mode="ambient", adaptive_makeup=False),
+    Arm("r3_hrtf_only", 1.0, depth_db=0.0, spatial_mode="hrtf", adaptive_makeup=False),
+    Arm("r3_decomposition_hrtf", 1.0, spatial_mode="decomposition_hrtf", adaptive_makeup=False),
+    Arm("r3_spatial_without_makeup", 1.0, adaptive_makeup=False),
+    Arm("r3_full_without_makeup", 1.0, 1.0, adaptive_makeup=False),
+)
+
+
+class DiagnosticSpatial(SpatialUpmix):
+    """僅供離線消融：不改產品 DSP 預設，也不重新實作正式 renderer。"""
+
+    def __init__(self, arm: Arm) -> None:
+        super().__init__()
+        self._diagnostic_arm = arm
+        mode = arm.spatial_mode
+        if mode != "current":
+            self.width = 1.0
+        if mode in ("decomposition", "hrtf", "decomposition_hrtf"):
+            self.surround_level = 0.0
+        self.depth_db = 0.0 if mode in ("ambient", "hrtf") else arm.depth_db
+        self.binaural = mode not in ("decomposition", "ambient")
+
+    def _build_scene(
+        self,
+        mid: ComplexArray,
+        side: ComplexArray,
+        primary_mid: ComplexArray,
+        primary_side: ComplexArray,
+    ) -> tuple[ComplexArray, ComplexArray, ComplexArray]:
+        if self._diagnostic_arm.spatial_mode == "hrtf":
+            # 所有乾訊號送前方喇叭，無估計器的 primary/ambient 分流。
+            return mid, side, np.zeros_like(side)
+        return super()._build_scene(mid, side, primary_mid, primary_side)
+
+    def _compensate(
+        self,
+        out_mid: ComplexArray,
+        out_side: ComplexArray,
+        dry_mid: ComplexArray,
+        dry_side: ComplexArray,
+    ) -> tuple[ComplexArray, ComplexArray]:
+        if not self._diagnostic_arm.adaptive_makeup:
+            return out_mid, out_side
+        return super()._compensate(out_mid, out_side, dry_mid, dry_side)
+
+
+def listening_order(arms: tuple[Arm, ...], seed: int | None, *, repeat: bool) -> list[int]:
+    """重複乾訊號與完整 100%，保留獨立盲測 ID，但不重跑／改變 PCM。"""
+    order = list(range(len(arms)))
+    if repeat:
+        if seed is None:
+            raise ValueError("R3 盲測需要 --seed")
+        order.extend(
+            next(index for index, arm in enumerate(arms) if arm.name == name)
+            for name in ("dry", "current_full_100")
+        )
+    if seed is not None:
+        random.Random(seed).shuffle(order)
+    return order
 
 
 def validate_audio(samples: Audio) -> None:
@@ -169,12 +245,15 @@ def render_arm(
     spatial = None
     reflections = None
     if arm.spatial_amount > 0:
-        spatial = SpatialUpmix()
+        if arm.spatial_mode == "current" and arm.adaptive_makeup:
+            spatial = SpatialUpmix()
+            spatial.binaural = True
+            spatial.depth_db = arm.depth_db
+        else:
+            spatial = DiagnosticSpatial(arm)
         spatial.amount = arm.spatial_amount
-        spatial.binaural = True
         spatial.hrtf_profile = profile
         spatial.cue_strength = 1.0
-        spatial.depth_db = arm.depth_db
         stages.append(spatial)
     if arm.reflection_amount > 0:
         reflections = EarlyReflections()
@@ -191,7 +270,7 @@ def render_arm(
     graph.set_stages(tuple(stages))
     if profile != SYNTHETIC_PROFILE:
         for stage in (spatial, reflections):
-            if stage is not None and not stage.hrtf_is_measured:
+            if stage is not None and stage.binaural and not stage.hrtf_is_measured:
                 raise ValueError(f"指定 profile 載入失敗，拒絕 synthetic fallback：{profile}")
 
     latency = graph.latency_frames
@@ -259,7 +338,8 @@ def render_arm(
             "process_calls": calls,
             "offline_process_elapsed_s": elapsed,
             "timing_is_authoritative_device_performance": False,
-            "spatial_label_note": "upmix/depth/HRTF retained; not HRTF-only",
+            "spatial_mode": arm.spatial_mode,
+            "adaptive_makeup": arm.adaptive_makeup,
         },
         aligned_gain,
     )
@@ -443,11 +523,12 @@ def normal_level_diagnostics(
     profile: str,
     block_frames: int,
     flush_seconds: float,
+    arms: tuple[Arm, ...] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, GainEnvelope]]:
     """以未額外衰減的原始電平跑全部 arms；只量測，不做聽測輸出。"""
     rows: list[dict[str, Any]] = []
     envelopes: dict[str, GainEnvelope] = {}
-    for arm in ARMS:
+    for arm in ARMS if arms is None else arms:
         rendered = render_arm(
             samples,
             arm,
@@ -634,6 +715,9 @@ def source_media_info(path: Path) -> dict[str, Any]:
 
 
 def run(args: argparse.Namespace) -> Path:
+    r3 = getattr(args, "matrix", "baseline") == "r3"
+    arms = R3_ARMS if r3 else ARMS
+    order = listening_order(arms, args.seed, repeat=r3)
     requested = Path(args.source).resolve()
     destination = Path(args.out).resolve()
     if destination.exists():
@@ -667,6 +751,7 @@ def run(args: argparse.Namespace) -> Path:
             profile=args.profile,
             block_frames=args.block,
             flush_seconds=args.flush,
+            arms=arms,
         )
 
     pre_db = args.pre_db
@@ -683,7 +768,7 @@ def run(args: argparse.Namespace) -> Path:
                 block_frames=args.block,
                 flush_seconds=args.flush,
             )
-            for arm in ARMS
+            for arm in arms
         ]
         reduced = {
             item.diagnostics["arm"]["name"]: item.diagnostics[
@@ -714,9 +799,6 @@ def run(args: argparse.Namespace) -> Path:
         > 0.1 + 1e-9
     ):
         raise RuntimeError("固定增益後 LUFS spread > 0.1；不匯出")
-    order = list(range(len(ARMS)))
-    if args.seed is not None:
-        random.Random(args.seed).shuffle(order)
     destination.mkdir(parents=True, exist_ok=False)
     normal_by_name = {row["arm"]: row for row in normal_rows}
     for arm_name, envelope in normal_envelopes.items():
@@ -729,7 +811,7 @@ def run(args: argparse.Namespace) -> Path:
     answer_map: dict[str, str] = {}
     diagnostics = []
     for number, index in enumerate(order, start=1):
-        name = f"sample_{number:02d}.wav" if args.seed is not None else f"{ARMS[index].name}.wav"
+        name = f"sample_{number:02d}.wav" if args.seed is not None else f"{arms[index].name}.wav"
         path = destination / name
         write_wav(exports[index], path, args.rate)
         # 24-bit 量化之後再 decode／回量，不能只用浮點輸出推論交付 WAV。
@@ -738,7 +820,7 @@ def run(args: argparse.Namespace) -> Path:
         )
         measured = measure_loudness(final, args.rate)
         validate_delivered_loudness([measured], target)
-        answer_map[name] = ARMS[index].name
+        answer_map[name] = arms[index].name
         diagnostics.append(
             {
                 **renders[index].diagnostics,
@@ -808,10 +890,16 @@ def run(args: argparse.Namespace) -> Path:
         "delivered_pairwise_lufs_spread": delivered_spread,
         "export_true_peak_ceiling_dbtp": -2.0,
         "randomization_seed": args.seed,
+        "matrix": "r3" if r3 else "baseline",
+        "repeat_stimuli": ["dry", "current_full_100"] if r3 else [],
         "arms": diagnostics,
         "limitations": [
             "No slider remap selected; current 50/55/60 retained as anchors.",
             "Spatial-without-reflections retains upmix/depth/makeup, not HRTF-only.",
+            "R3 decomposition-only is depth driven by the estimator, not an isolated stem.",
+            "R3 ambient-only is stereo surround gain with neutral depth/width and unity makeup.",
+            "R3 HRTF-only uses front rendering with dry signal and no adaptive makeup.",
+            "A fixed makeup gain cancels under constant LUFS matching; unity is the control.",
             "Preroll starts from zero DSP history; verify 2s versus longer context convergence.",
             "Context decode start is floored to the global source STFT-hop grid.",
             "Real postroll precedes zero tail flushing; EOF-shortened context is explicit.",
@@ -869,6 +957,7 @@ def main() -> None:
         help="另以原始解碼電平量 LUFS/頻帶/相關性與完整 limiter gain envelope；不匯出聽測 WAV",
     )
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--matrix", choices=("baseline", "r3"), default="baseline")
     parser.add_argument("--xm4-power", choices=("unknown", "on", "off"), default="unknown")
     parser.add_argument("--anc", choices=("unknown", "on", "off", "ambient"), default="unknown")
     args = parser.parse_args()

@@ -325,3 +325,36 @@ def test_global_stft_grid_makes_off_grid_two_and_four_second_contexts_converge(
             profile="synthetic",
         ).samples[round(preroll * rate) : round(preroll * rate) + segment_frames]
         assert float(np.abs(legacy - reference).max()) > 1e-4
+
+def test_r3_blind_order_repeats_exact_control_ids() -> None:
+    arms = probe.R3_ARMS
+    order = probe.listening_order(arms, 12, repeat=True)
+    assert order == probe.listening_order(arms, 12, repeat=True)
+    names = [arms[index].name for index in order]
+    assert names.count("dry") == 2
+    assert names.count("current_full_100") == 2
+    assert len(names) == len(arms) + 2
+    with pytest.raises(ValueError, match="seed"):
+        probe.listening_order(arms, None, repeat=True)
+
+
+@pytest.mark.parametrize("arm", probe.R3_ARMS[8:], ids=lambda arm: arm.name)
+def test_r3_ablation_is_finite_and_chunk_invariant(arm: object) -> None:
+    source = signal(8192)
+    short = probe.render_arm(source, arm, rate=48000, profile="synthetic", block_frames=256)
+    long = probe.render_arm(source, arm, rate=48000, profile="synthetic", block_frames=2880)
+    assert np.all(np.isfinite(short.samples))
+    np.testing.assert_allclose(short.samples, long.samples, atol=2e-7, rtol=2e-6)
+    assert short.diagnostics["adaptive_makeup"] is False
+    assert short.diagnostics["spatial_mode"] == arm.spatial_mode
+
+
+def test_r3_hrtf_only_has_no_estimator_dependency() -> None:
+    arm = next(a for a in probe.R3_ARMS if a.name == "r3_hrtf_only")
+    spatial = probe.DiagnosticSpatial(arm)
+    mid = np.array([1.0 + 0.5j, 2.0 + 0.1j])
+    side = np.array([0.5 + 0.1j, 0.3 + 0.2j])
+    scene = spatial._build_scene(mid, side, np.zeros_like(mid), np.zeros_like(side))
+    np.testing.assert_array_equal(scene[0], mid)
+    np.testing.assert_array_equal(scene[1], side)
+    np.testing.assert_array_equal(scene[2], np.zeros_like(side))

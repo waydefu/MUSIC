@@ -145,7 +145,8 @@ class AudioEngine:
 
     @volume.setter
     def volume(self, value: float) -> None:
-        self._volume = min(max(float(value), 0.0), 1.0)
+        if np.isfinite(value):
+            self._volume = min(max(float(value), 0.0), 1.0)
 
     @property
     def muted(self) -> bool:
@@ -524,7 +525,7 @@ def decode_all(path: str, sample_rate: int, channels: int = 2) -> FloatArray:
             sample_rate=sample_rate,
             frames_to_read=4096,
         )
-        next(source)
+        # stream_file 已 primed；next() 會消耗第一批 PCM。
     except (miniaudio.MiniaudioError, OSError, FileNotFoundError):
         return np.zeros(0, dtype=np.float32)
 

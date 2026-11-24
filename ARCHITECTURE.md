@@ -39,7 +39,7 @@ flowchart LR
     Core --> Metadata
 ```
 
-依賴方向原則：`qml → bridge → audio/library/platform_win → core`。`core` 不依賴 Qt UI；`library/scanner.py` 保持純 Python，是否放到背景執行由 bridge 層決定。
+依賴方向原則：`qml → bridge → audio/library/platform → core`。`core` 不依賴 Qt UI；`library/scanner.py` 保持純 Python，是否放到背景執行由 bridge 層決定。
 
 ## 目錄與責任索引
 
@@ -137,8 +137,7 @@ flowchart TB
 
 任何新背景工作都應沿用這個邊界：背景只做 I/O 或純計算，回傳不可變資料；Qt model 與 signal 的狀態變更集中在主執行緒。
 
-**DSP 級聯跑在音訊回呼上**，所以它受同一條規則的更嚴格版本約束：不得配置
-記憶體、不得發 Qt signal、不得取得會被主執行緒持有的鎖。處理器要回報狀態
+**DSP 級聯跑在音訊回呼上**，所以它受同一條規則的更嚴格版本約束：不得新增可避免的穩態配置、不得發 Qt signal、不得取得會被主執行緒持有的鎖。處理器要回報狀態
 （例如限幅器啟動、DSP 降級）時一律設旗標，由 `PlayerController._tick()`
 在主執行緒撈出來 —— 與 `AudioEngine.take_finished` 同一個模式。
 回呼的時間預算與實測數字見 [PROJECT_PLAN.md](PROJECT_PLAN.md) §9.4 與 §9.9。
