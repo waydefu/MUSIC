@@ -685,3 +685,10 @@ def test_configure_output_switches_rate_midstream(flac_path: Path) -> None:
         assert engine.position == pytest.approx(3.0, abs=0.2)
     finally:
         engine.close()
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_volume_ignores_nonfinite_control_values(value: float) -> None:
+    with AudioEngine(RATE) as engine:
+        engine.volume = 0.4
+        engine.volume = value
+        assert engine.volume == 0.4

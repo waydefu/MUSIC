@@ -145,7 +145,8 @@ class AudioEngine:
 
     @volume.setter
     def volume(self, value: float) -> None:
-        self._volume = min(max(float(value), 0.0), 1.0)
+        if np.isfinite(value):
+            self._volume = min(max(float(value), 0.0), 1.0)
 
     @property
     def muted(self) -> bool:

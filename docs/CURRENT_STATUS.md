@@ -87,6 +87,15 @@ Issue #43（單一聽者、單一曲目，屬 MANUAL-VERIFICATION-REQUIRED）目
 
 F/G 目前不是下一步。只有 R3 後仍證明有定位／外部化／房間線索缺口才進。
 
+## R3 離線工具執行方式（候選，不代表聽感改善）
+
+`tools/probe_naturalness.py --matrix r3 --seed 314159` 搭配既有來源、時間段、
+profile、輸出路徑參數可產生單因子診斷矩陣。保留舊 baseline 模式；R3 增加
+depth 驅動的 decomposition、僅環境聲加寬、乾訊號 HRTF、decomposition + HRTF、
+無 adaptive makeup 的 Spatial 與完整級聯，並重複乾訊號及 100% 完整級聯。
+固定 makeup 在等 LUFS 交付時會被整段增益抵銷，故使用 unity 作對照。
+R3 不是獨立聲源分離評分，不把單一指標當自然度結論；需另行完成跨曲風盲聽。
+
 ## 目前仍需人工／特定環境
 
 - WH-1000XM4 實際 A/B 與主觀評分

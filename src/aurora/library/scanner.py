@@ -32,7 +32,7 @@ def iter_audio_files(roots: list[str] | tuple[str, ...]) -> Iterator[Path]:
     while stack:
         current = stack.pop()
         try:
-            resolved = str(current.resolve()).lower()
+            resolved = os.path.normcase(str(current.resolve()))
         except OSError:
             continue
         if resolved in seen:  # 對付符號連結造成的環

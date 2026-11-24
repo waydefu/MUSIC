@@ -7,6 +7,7 @@ Python ``Track`` 放進結果佇列；``PlayerController`` 的 60 Hz 計時器�
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
 from collections.abc import Iterable
@@ -35,7 +36,7 @@ class MetadataLoader:
         with self._pending_lock:
             for raw_path in paths:
                 path = str(raw_path)
-                key = path.casefold()
+                key = os.path.normcase(path)
                 if not path or key in self._pending:
                     continue
                 self._pending.add(key)
@@ -83,7 +84,7 @@ class MetadataLoader:
             path = str(item)
             track = read_track(path)
             with self._pending_lock:
-                self._pending.discard(path.casefold())
+                self._pending.discard(os.path.normcase(path))
             if track is not None:
                 batch.append(track)
 
