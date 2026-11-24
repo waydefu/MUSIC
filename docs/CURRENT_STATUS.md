@@ -1,6 +1,6 @@
 # AURORA 目前狀態
 
-更新：2026-11-09  
+更新：2026-11-24  
 本頁是**專案目前狀態與下一步的唯一權威入口**。歷史設計、實驗過程與舊交接保留在 `PROJECT_PLAN.md`；需要知道「現在做到哪、接下來做什麼」時，以本頁為準。
 
 ## 目前基線
@@ -103,6 +103,8 @@ R3 不是獨立聲源分離評分，不把單一指標當自然度結論；需�
 - 舊 CI 基線不等同新提交；以 PR 最新 SHA 的 Windows/macOS、Dependency audit
   與 frozen bundle 結果作驗收。
 - uv 同步鎖定、uv 版本固定，新增鎖檔漏洞稽核；不因更新失敗忽略 PySide6。
+- 首次 audit 發現 GHSA-xmj3-9gf7-h52w（setuptools 84.0.0），鎖檔定向升級至 84.1.0；
+  以 locked sync、audit 和雙平台封裝驗證修補，不豁免 advisory。
 - 保留 `PROJECT_PLAN.md` 歷史與章節引用；日常 agent 不需要整檔讀取。
 - 仍需獨立驗收：跨 stage 的 HRTF 原子發布與延遲對齊交叉淡化、剩餘 callback
   配置量測、視覺基準、coverage/property-based gate、tag ruleset 管理權限、
