@@ -6,6 +6,8 @@ updates:
   # branch and the Windows/macOS required checks.
   - package-ecosystem: "uv"
     directory: "/"
+    # Desktop application: advance constraints instead of widening library ranges.
+    versioning-strategy: increase
     schedule:
       interval: "weekly"
       day: "monday"

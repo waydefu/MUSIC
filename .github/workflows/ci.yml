@@ -162,6 +162,11 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: uv run aurora --validate-qml
 
+      - name: QML keyboard interaction
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run --locked python tools/check_qml_interactions.py
+
       # 封裝敏感 PR 必須在真正 frozen 的 EXE 內再驗一次 QML、platform adapter、
       # 必要 DLL/CFFI 模組與禁止的 Qt 贅重內容。這不是每個 PR 都跑的昂貴 gate。
       - name: Windows frozen bundle 驗證
@@ -277,6 +282,11 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: uv run aurora --validate-qml
+
+      - name: QML keyboard interaction
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run --locked python tools/check_qml_interactions.py
 
       - name: macOS frozen bundle 驗證
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.packaging.outputs.required == 'true'
