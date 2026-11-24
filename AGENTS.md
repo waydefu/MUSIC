@@ -30,6 +30,8 @@ numpy 做 FFT／音質分析。uv 管相依，PyInstaller `onedir` 打包，Powe
 | QML／著色器子樹的額外規則 | [src/aurora/qml/AGENTS.md](src/aurora/qml/AGENTS.md) |
 
 不要把 ARCHITECTURE.md 的架構圖或 README.md 的基準數字複製到這裡；它們有各自的擁有者。
+`PROJECT_PLAN.md` 是歷史帳本：只依本頁及 CURRENT_STATUS 的指向讀相關章節，
+不將整份歷史計畫載入每次任務。
 
 ## 單一真相來源
 

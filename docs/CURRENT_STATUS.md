@@ -96,6 +96,18 @@ depth 驅動的 decomposition、僅環境聲加寬、乾訊號 HRTF、decomposit
 固定 makeup 在等 LUFS 交付時會被整段增益抵銷，故使用 unity 作對照。
 R3 不是獨立聲源分離評分，不把單一指標當自然度結論；需另行完成跨曲風盲聽。
 
+## 11/24 稽核修正（PR #58，未合併前不當成 main）
+
+- 離線解碼首段、設定與 HRTF 異常資料、FFT 工作區重用、音訊回呼邊界 reset、
+  介面鍵盤焦點與 HRTF 降級提示、case-sensitive 路徑修正。
+- 舊 CI 基線不等同新提交；以 PR 最新 SHA 的 Windows/macOS、Dependency audit
+  與 frozen bundle 結果作驗收。
+- uv 同步鎖定、uv 版本固定，新增鎖檔漏洞稽核；不因更新失敗忽略 PySide6。
+- 保留 `PROJECT_PLAN.md` 歷史與章節引用；日常 agent 不需要整檔讀取。
+- 仍需獨立驗收：跨 stage 的 HRTF 原子發布與延遲對齊交叉淡化、剩餘 callback
+  配置量測、視覺基準、coverage/property-based gate、tag ruleset 管理權限、
+  R3 跨曲風盲測、實機 deadline／安裝器。Rust 遷移待實測瓶頸決定，不能當作音質改善。
+
 ## 目前仍需人工／特定環境
 
 - WH-1000XM4 實際 A/B 與主觀評分
