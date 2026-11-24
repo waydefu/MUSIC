@@ -106,7 +106,9 @@ R3 不是獨立聲源分離評分，不把單一指標當自然度結論；需�
 - 首次 audit 發現 GHSA-xmj3-9gf7-h52w（setuptools 84.0.0），鎖檔定向升級至 84.1.0；
   以 locked sync、audit 和雙平台封裝驗證修補，不豁免 advisory。
 - 保留 `PROJECT_PLAN.md` 歷史與章節引用；日常 agent 不需要整檔讀取。
-- 仍需獨立驗收：跨 stage 的 HRTF 原子發布與延遲對齊交叉淡化、剩餘 callback
+- Spatial / Reflections 的 amount、HRTF kernels 以同一 graph block 快照發布；
+  測試注入兩級間的 UI 更新，確認不混合新舊控制。
+- 仍需獨立驗收：延遲對齊交叉淡化、剩餘 callback
   配置量測、視覺基準、coverage/property-based gate、tag ruleset 管理權限、
   R3 跨曲風盲測、實機 deadline／安裝器。Rust 遷移待實測瓶頸決定，不能當作音質改善。
 

@@ -68,6 +68,8 @@ Goodwin／Jot 那一路的做法）：
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
+from functools import partial
 
 import numpy as np
 import numpy.typing as npt
@@ -394,17 +396,25 @@ class SpatialUpmix:
         """
         return 0 if not self.active else self._fft
 
+    def snapshot_process(self) -> Callable[[FloatArray], None]:
+        return partial(self._process_snapshot, self._amount_request, self._binaural_state)
+
     def process(self, buf: FloatArray) -> None:
-        amount, epoch = self._amount_request
+        self._process_snapshot(self._amount_request, self._binaural_state, buf)
+
+    def _process_snapshot(
+        self, request: tuple[float, int], state: BinauralState | None, buf: FloatArray
+    ) -> None:
+        amount, epoch = request
         if amount <= 1e-6 or not self._ready:
             return
         if epoch != self._amount_epoch:
             self.reset()
             self._amount_epoch = epoch
         self._amount = amount
-        self._process_active(buf)
+        self._process_active(buf, state)
 
-    def _process_active(self, buf: FloatArray) -> None:
+    def _process_active(self, buf: FloatArray, state: BinauralState | None) -> None:
         frames = buf.size // self._channels
         if frames == 0:
             return
@@ -414,13 +424,13 @@ class SpatialUpmix:
             # 回呼比 prepare 宣告的還大時分批做，而不是在回呼裡重新配置。
             step = self._pending.shape[0] - self._fft
             for start in range(0, buf.size, step * self._channels):
-                self._process_active(buf[start : start + step * self._channels])
+                self._process_active(buf[start : start + step * self._channels], state)
             return
         self._pending[self._pending_len : self._pending_len + frames] = view
         self._pending_len += frames
 
         while self._pending_len >= self._fft:
-            self._advance()
+            self._advance(state)
 
         # 預填保證了這裡永遠取得到，但仍留一條安全路徑：真的不夠時把靜音
         # 補在**前面**（等同多一點延遲），而不是補在後面 —— 補後面會把
@@ -438,7 +448,7 @@ class SpatialUpmix:
 
     # ------------------------------------------------------------ 內部
 
-    def _advance(self) -> None:
+    def _advance(self, state: BinauralState | None) -> None:
         """處理一個 STFT 框，並吐出一個 hop 的輸出。"""
         np.multiply(self._pending[: self._fft], self._window[:, None], out=self._windowed)
         # 就地左移而不是重新配置。
@@ -457,7 +467,6 @@ class SpatialUpmix:
 
         primary_mid, primary_side = self._analyse(mid, side)
         scene = self._build_scene(mid, side, primary_mid, primary_side)
-        state = self._binaural_state
         if state is not None:
             out_mid, out_side = self._render_binaural(*scene, mid, side, state)
         else:

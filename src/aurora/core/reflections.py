@@ -88,6 +88,8 @@ D/R 控制（``core/spatial.py`` 的 depth）已經能把直達聲往後推，�
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
+from functools import partial
 
 import numpy as np
 import numpy.typing as npt
@@ -360,8 +362,16 @@ class EarlyReflections:
         """
         return 0
 
+    def snapshot_process(self) -> Callable[[FloatArray], None]:
+        return partial(self._process_snapshot, self._amount_request, self._binaural_kernels)
+
     def process(self, buf: FloatArray) -> None:
-        amount, epoch = self._amount_request
+        self._process_snapshot(self._amount_request, self._binaural_kernels, buf)
+
+    def _process_snapshot(
+        self, request: tuple[float, int], binaural: Kernels | None, buf: FloatArray
+    ) -> None:
+        amount, epoch = request
         if amount <= 1e-6 or self._line is None or self._tail is None:
             return
         if epoch != self._amount_epoch:
@@ -378,10 +388,10 @@ class EarlyReflections:
         start = 0
         while start < frames:
             stop = min(start + self._capacity, frames)
-            self._process_block(view[start:stop])
+            self._process_block(view[start:stop], binaural)
             start = stop
 
-    def _process_block(self, view: npt.NDArray[np.float32]) -> None:
+    def _process_block(self, view: npt.NDArray[np.float32], binaural: Kernels | None) -> None:
         assert self._line is not None and self._tail is not None
         frames = view.shape[0]
         capacity = self._line.shape[0]
@@ -393,7 +403,6 @@ class EarlyReflections:
         # 2. 讀出兩個抽頭。時間差就是空間尺度。
         summed = self._summed[:frames]
         summed.fill(0.0)
-        binaural = self._binaural_kernels
         for order, delay in enumerate(self._delays):
             taps = (self._write - delay + np.arange(frames)) % capacity
             echo = self._line[taps]

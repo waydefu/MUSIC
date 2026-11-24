@@ -37,6 +37,7 @@ EQ、Spatial、Limiter 之後都掛在這裡。先把契約定死，是因為回
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -75,6 +76,13 @@ class AudioProcessor(Protocol):
         ...
 
 
+class SnapshotProcessor(AudioProcessor, Protocol):
+    """控制參數在主執行緒捕捉，回呼只使用已發布的完整版本。"""
+
+    def snapshot_process(self) -> Callable[[FloatArray], None]:
+        ...
+
+
 class DspGraph:
     """依序執行的處理器級聯，外加一張永久性的安全網。
 
@@ -83,7 +91,12 @@ class DspGraph:
     """
 
     def __init__(self) -> None:
-        self._publication: tuple[tuple[AudioProcessor, ...], tuple[int, ...]] = ((), ())
+        self._publication: tuple[
+            tuple[AudioProcessor, ...],
+            tuple[int, ...],
+            tuple[Callable[[FloatArray], None] | None, ...],
+        ] = ((), (), ())
+        self._snapshot_processors: tuple[SnapshotProcessor, ...] = ()
         self._reset_epochs: dict[int, int] = {}
         self._applied_epochs: dict[int, int] = {}
         self._bypass = False
@@ -174,9 +187,26 @@ class DspGraph:
                 elif id(stage) not in live:
                     # 舊 callback 可能仍握有先前的 tuple；只發布 reset epoch。
                     self._reset_epochs[id(stage)] += 1
+        self._publish(stages)
+
+    def set_snapshot_processors(self, processors: tuple[SnapshotProcessor, ...]) -> None:
+        """由 controller 登記共用控制的一組 processors；僅主執行緒。"""
+        self._snapshot_processors = processors
+        self.publish_controls()
+
+    def publish_controls(self) -> None:
+        """整組參數準備完才發布，不重設正在使用的 DSP 歷史。"""
+        self._publish(self.stages)
+
+    def _publish(self, stages: tuple[AudioProcessor, ...]) -> None:
+        registered = {id(stage): stage for stage in self._snapshot_processors}
         self._publication = (
             tuple(stages),
             tuple(self._reset_epochs.get(id(stage), 0) for stage in stages),
+            tuple(
+                registered[id(stage)].snapshot_process() if id(stage) in registered else None
+                for stage in stages
+            ),
         )
 
     def prepare(self, sample_rate: int, channels: int, max_frames: int) -> None:
@@ -189,6 +219,7 @@ class DspGraph:
         self._workspace = np.empty(max_frames * channels, dtype=np.float32)
         for stage in self._publication[0]:
             self._prepare_stage(stage, self._config)
+        self.publish_controls()
 
     def _prepare_stage(self, stage: AudioProcessor, config: tuple[int, int, int]) -> None:
         stage.prepare(*config)
@@ -230,7 +261,7 @@ class DspGraph:
         """
         if self._bypass or self._degraded:
             return
-        stages, epochs = self._publication  # 級聯與 reset epoch 一次讀取
+        stages, epochs, processors = self._publication  # 級聯、epoch、控制一起讀取
         if not stages:
             return
 
@@ -256,12 +287,15 @@ class DspGraph:
         working = workspace[: buf.size]
         try:
             np.copyto(working, buf)
-            for stage, epoch in zip(stages, epochs, strict=True):
+            for stage, epoch, processor in zip(stages, epochs, processors, strict=True):
                 key = id(stage)
                 if self._applied_epochs.get(key, 0) != epoch:
                     stage.reset()
                     self._applied_epochs[key] = epoch
-                stage.process(working)
+                if processor is None:
+                    stage.process(working)
+                else:
+                    processor(working)
         # 這裡故意攔下所有 Exception。整個模組存在的理由就是「不讓任何東西
         # 逃到回呼外面」—— 逃出去的下場是產生器結束、播放靜靜停住。
         except Exception as exc:

@@ -76,6 +76,7 @@ class AudioFxController(QObject):
         self._reflections = EarlyReflections()
         self._limiter = Limiter()
         self._meter = OutputMeter()
+        self._engine.graph.set_snapshot_processors((self._spatial, self._reflections))
 
         # **設定檔是增益的唯一真相來源，處理器不是。** 停用時處理器會被填成
         # 全平（否則 graph 裡還是會跑 FFT），這時若從處理器讀值，UI 的滑桿
@@ -162,6 +163,7 @@ class AudioFxController(QObject):
         self._spatial.binaural = bool(enabled)
         self._reflections.binaural = self._spatial.binaural
         self._config.binaural = self._spatial.binaural
+        self._engine.graph.publish_controls()
         self.spatialChanged.emit()
 
     @Property(list, notify=spatialChanged)
@@ -200,6 +202,7 @@ class AudioFxController(QObject):
         self._config.hrtf_profile = name
         self._spatial.hrtf_profile = name
         self._reflections.hrtf_profile = name
+        self._engine.graph.publish_controls()
         self.spatialChanged.emit()
 
     @Property(float, notify=spatialChanged)
@@ -214,6 +217,7 @@ class AudioFxController(QObject):
         self._spatial.cue_strength = value
         self._reflections.cue_strength = self._spatial.cue_strength
         self._config.hrtf_accuracy = self._spatial.cue_strength
+        self._engine.graph.publish_controls()
         self.spatialChanged.emit()
 
     @Property(bool, notify=spatialChanged)
