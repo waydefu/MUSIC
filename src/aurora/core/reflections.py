@@ -147,7 +147,9 @@ class EarlyReflections:
     """
 
     def __init__(self) -> None:
-        self._amount = 0.0
+        self._amount = 0.0  # audio-thread effective value
+        self._amount_request = (0.0, 0)
+        self._amount_epoch = 0
         self._level = REFLECTION_LEVEL
         self._channels = 0
         self._sample_rate = 0
@@ -179,17 +181,18 @@ class EarlyReflections:
 
     @property
     def amount(self) -> float:
-        return self._amount
+        return self._amount_request[0]
 
     @amount.setter
     def amount(self, value: float) -> None:
+        if not math.isfinite(value):
+            return
         amount = float(np.clip(value, 0.0, 1.0))
-        # 關著的時候延遲線不會前進，裡面留的是上次開著時的音訊 —— 從關到開
-        # 不清的話，前 23 ms 的反射會是不知道多久以前的內容。**先清、再改
-        # amount**：amount 還是 0 時回呼一碰到 process 就返回，不會同時動到它。
-        if amount > 1e-6 and not self.active:
-            self.reset()
-        self._amount = amount
+        previous, epoch = self._amount_request
+        if amount > 1e-6 and previous <= 1e-6:
+            epoch += 1
+        # 只發布不可變設定；reset 由音訊執行緒執行，避免與舊 block 競爭。
+        self._amount_request = (amount, epoch)
 
     @property
     def level(self) -> float:
@@ -242,7 +245,7 @@ class EarlyReflections:
 
     @property
     def active(self) -> bool:
-        return self._amount > 1e-6 and self._channels == 2 and self._line is not None
+        return self.amount > 1e-6 and self._channels == 2 and self._line is not None
 
     # ------------------------------------------------------------ AudioProcessor
 
@@ -358,8 +361,13 @@ class EarlyReflections:
         return 0
 
     def process(self, buf: FloatArray) -> None:
-        if not self.active or self._line is None or self._tail is None:
+        amount, epoch = self._amount_request
+        if amount <= 1e-6 or self._line is None or self._tail is None:
             return
+        if epoch != self._amount_epoch:
+            self.reset()
+            self._amount_epoch = epoch
+        self._amount = amount
         frames = buf.size // self._channels
         if frames == 0:
             return

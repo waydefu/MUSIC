@@ -187,7 +187,7 @@ class AudioFxController(QObject):
 
     @Property(str, notify=spatialChanged)
     def hrtfProfile(self) -> str:
-        """目前實際生效的 profile 名稱。"""
+        """選定的 profile（自動時為候選）；是否成功載入另由狀態屬性回報。"""
         return self._active_profile()
 
     @Slot(str)
@@ -223,7 +223,17 @@ class AudioFxController(QObject):
         UI 必須照實顯示。合成模型沒有耳廓，做不出可靠的前後區分 ——
         讓它冒充完成品，使用者只會覺得功能壞了。
         """
-        return self._spatial.hrtf_is_measured
+        return self._spatial.hrtf_is_measured and self._reflections.hrtf_is_measured
+
+    @Property(bool, notify=spatialChanged)
+    def hrtfFallback(self) -> bool:
+        """使用者選了實測 profile，但已啟用的空間級聯未完整載入。"""
+        return (
+            self._spatial.amount > 0.0
+            and self._spatial.binaural
+            and self._active_profile() != SYNTHETIC_PROFILE
+            and not (self._spatial.hrtf_is_measured and self._reflections.hrtf_is_measured)
+        )
 
     @Property(float, notify=spatialChanged)
     def spatialAmount(self) -> float:

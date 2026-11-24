@@ -83,7 +83,9 @@ class DspGraph:
     """
 
     def __init__(self) -> None:
-        self._stages: tuple[AudioProcessor, ...] = ()
+        self._publication: tuple[tuple[AudioProcessor, ...], tuple[int, ...]] = ((), ())
+        self._reset_epochs: dict[int, int] = {}
+        self._applied_epochs: dict[int, int] = {}
         self._bypass = False
         self._degraded = False
         self._reason: str | None = None
@@ -99,7 +101,7 @@ class DspGraph:
 
     @property
     def stages(self) -> tuple[AudioProcessor, ...]:
-        return self._stages
+        return self._publication[0]
 
     @property
     def bypass(self) -> bool:
@@ -123,14 +125,14 @@ class DspGraph:
     @property
     def active(self) -> bool:
         """這次回呼會不會真的做事。"""
-        return bool(self._stages) and not self._bypass and not self._degraded
+        return bool(self._publication[0]) and not self._bypass and not self._degraded
 
     @property
     def latency_frames(self) -> int:
         """整條級聯的演算法延遲。bypass 或降級時是 0。"""
         if not self.active:
             return 0
-        return sum(stage.latency_frames for stage in self._stages)
+        return sum(stage.latency_frames for stage in self._publication[0])
 
     def take_degradation(self) -> str | None:
         """消費「剛剛降級了」這個事件。UI 輪詢一次，讀到就自動清除。
@@ -160,18 +162,22 @@ class DspGraph:
 
         * 參數跟上次不同（或從沒 prepare 過）→ prepare。
         * 參數相同、但上一版 tuple 裡沒有它（被拿掉後又加回來）→ 只 reset，
-          清掉它離開期間殘留的舊音訊。它不在回呼正在走的 tuple 裡，所以安全。
+          清掉它離開期間殘留的舊音訊。reset 由下一次回呼執行，不與舊回呼競爭。
         * 參數相同、而且一直在 tuple 裡 → 什麼都不做。
         """
         if self._config is not None:
-            live = {id(stage) for stage in self._stages}
+            live = {id(stage) for stage in self._publication[0]}
             for stage in stages:
                 record = self._prepared.get(id(stage))
                 if record is None or record[0] is not stage or record[1] != self._config:
                     self._prepare_stage(stage, self._config)
                 elif id(stage) not in live:
-                    stage.reset()
-        self._stages = tuple(stages)
+                    # 舊 callback 可能仍握有先前的 tuple；只發布 reset epoch。
+                    self._reset_epochs[id(stage)] += 1
+        self._publication = (
+            tuple(stages),
+            tuple(self._reset_epochs.get(id(stage), 0) for stage in stages),
+        )
 
     def prepare(self, sample_rate: int, channels: int, max_frames: int) -> None:
         """設定格式並讓每一級預先配置。裝置換取樣率時會再呼叫。
@@ -181,12 +187,15 @@ class DspGraph:
         """
         self._config = (sample_rate, channels, max_frames)
         self._workspace = np.empty(max_frames * channels, dtype=np.float32)
-        for stage in self._stages:
+        for stage in self._publication[0]:
             self._prepare_stage(stage, self._config)
 
     def _prepare_stage(self, stage: AudioProcessor, config: tuple[int, int, int]) -> None:
         stage.prepare(*config)
-        self._prepared[id(stage)] = (stage, config)
+        key = id(stage)
+        self._prepared[key] = (stage, config)
+        self._reset_epochs.setdefault(key, 0)
+        self._applied_epochs[key] = self._reset_epochs[key]
 
     def reset(self) -> None:
         """換歌／seek 時清掉各級的位置相關狀態。
@@ -194,8 +203,9 @@ class DspGraph:
         **不會**解除降級。降級代表有處理器真的壞了，換一首歌不會把它修好；
         要解除必須明確呼叫 :meth:`clear_degradation`。
         """
-        for stage in self._stages:
+        for stage in self._publication[0]:
             stage.reset()
+            self._applied_epochs[id(stage)] = self._reset_epochs.get(id(stage), 0)
 
     def clear_degradation(self) -> None:
         """重設所有級的歷史後解除降級。
@@ -205,8 +215,7 @@ class DspGraph:
         """
         if not self._degraded:
             return
-        for stage in self._stages:
-            stage.reset()
+        self.reset()
         self._degraded = False
         self._reason = None
         self._pending_reason = None
@@ -221,7 +230,7 @@ class DspGraph:
         """
         if self._bypass or self._degraded:
             return
-        stages = self._stages  # 一次原子讀取，避免走訪到一半被換掉
+        stages, epochs = self._publication  # 級聯與 reset epoch 一次讀取
         if not stages:
             return
 
@@ -247,7 +256,11 @@ class DspGraph:
         working = workspace[: buf.size]
         try:
             np.copyto(working, buf)
-            for stage in stages:
+            for stage, epoch in zip(stages, epochs, strict=True):
+                key = id(stage)
+                if self._applied_epochs.get(key, 0) != epoch:
+                    stage.reset()
+                    self._applied_epochs[key] = epoch
                 stage.process(working)
         # 這裡故意攔下所有 Exception。整個模組存在的理由就是「不讓任何東西
         # 逃到回呼外面」—— 逃出去的下場是產生器結束、播放靜靜停住。

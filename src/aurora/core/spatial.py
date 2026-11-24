@@ -146,7 +146,9 @@ class SpatialUpmix:
         if fft_size % hop != 0 or fft_size // hop != 2:
             raise ValueError("目前只支援 50% 重疊（fft_size 必須是 hop 的兩倍）")
         self._base_fft = fft_size
-        self._amount = 0.0
+        self._amount = 0.0  # audio-thread effective value
+        self._amount_request = (0.0, 0)
+        self._amount_epoch = 0
         self._surround = SPATIAL_SURROUND_LEVEL
         self._depth_db = SPATIAL_DEPTH_DB
         self._width = SPATIAL_WIDTH
@@ -235,17 +237,18 @@ class SpatialUpmix:
 
     @property
     def amount(self) -> float:
-        return self._amount
+        return self._amount_request[0]
 
     @amount.setter
     def amount(self, value: float) -> None:
+        if not math.isfinite(value):
+            return
         amount = float(np.clip(value, 0.0, 1.0))
-        # 從關到開時緩衝裡是它上次開著時的舊東西，不重設會少掉預填的靜音、
-        # 前一個視窗的輸出也會錯位。**先重設、再改 amount**：amount 還是 0 時
-        # 回呼一碰到 process 就直接返回，不會與這裡的重設同時動到 buffer。
-        if amount > 1e-6 and not self.active and self._ready:
-            self.reset()
-        self._amount = amount
+        previous, epoch = self._amount_request
+        if amount > 1e-6 and previous <= 1e-6:
+            epoch += 1
+        # 只發布不可變設定；reset 由音訊執行緒執行，避免與舊 block 競爭。
+        self._amount_request = (amount, epoch)
 
     @property
     def binaural(self) -> bool:
@@ -261,6 +264,9 @@ class SpatialUpmix:
         self._binaural = bool(value)
         if self._binaural and self._sample_rate:
             self._load_hrtf(self._sample_rate)
+        elif not self._binaural:
+            self._binaural_state = None
+            self._hrtf_measured = False
 
     @property
     def hrtf_is_measured(self) -> bool:
@@ -342,7 +348,7 @@ class SpatialUpmix:
 
     @property
     def active(self) -> bool:
-        return self._amount > 1e-6 and self._ready
+        return self.amount > 1e-6 and self._ready
 
     # ------------------------------------------------------------ AudioProcessor
 
@@ -389,8 +395,16 @@ class SpatialUpmix:
         return 0 if not self.active else self._fft
 
     def process(self, buf: FloatArray) -> None:
-        if not self.active:
+        amount, epoch = self._amount_request
+        if amount <= 1e-6 or not self._ready:
             return
+        if epoch != self._amount_epoch:
+            self.reset()
+            self._amount_epoch = epoch
+        self._amount = amount
+        self._process_active(buf)
+
+    def _process_active(self, buf: FloatArray) -> None:
         frames = buf.size // self._channels
         if frames == 0:
             return
@@ -400,7 +414,7 @@ class SpatialUpmix:
             # 回呼比 prepare 宣告的還大時分批做，而不是在回呼裡重新配置。
             step = self._pending.shape[0] - self._fft
             for start in range(0, buf.size, step * self._channels):
-                self.process(buf[start : start + step * self._channels])
+                self._process_active(buf[start : start + step * self._channels])
             return
         self._pending[self._pending_len : self._pending_len + frames] = view
         self._pending_len += frames
@@ -443,8 +457,9 @@ class SpatialUpmix:
 
         primary_mid, primary_side = self._analyse(mid, side)
         scene = self._build_scene(mid, side, primary_mid, primary_side)
-        if self._binaural and self._binaural_state is not None:
-            out_mid, out_side = self._render_binaural(*scene, mid, side)
+        state = self._binaural_state
+        if state is not None:
+            out_mid, out_side = self._render_binaural(*scene, mid, side, state)
         else:
             out_mid, out_side = self._render_stereo(*scene, mid, side)
 
@@ -611,6 +626,7 @@ class SpatialUpmix:
         ambience_side: ComplexArray,
         dry_mid: ComplexArray,
         dry_side: ComplexArray,
+        state: BinauralState,
     ) -> tuple[ComplexArray, ComplexArray]:
         """HRTF Renderer：把同一個場景改用頭部轉移函數送到兩耳。
 
@@ -641,8 +657,6 @@ class SpatialUpmix:
         時那就是原訊號，天然透明），但 HRTF 會改變 side 的頻譜，
         不淡入的話 ``amount=0`` 就不再是旁通了。
         """
-        state = self._binaural_state
-        assert state is not None  # 呼叫端已經檢查過
         hrtf, log_magnitude, phase = state
         amount = self._amount
         gain, width, depth = self._wet_coefficients()
