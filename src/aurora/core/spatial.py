@@ -187,6 +187,10 @@ class SpatialUpmix:
         self._smoothed_m = np.zeros(bins)
         self._smoothed_s = np.zeros(bins)
         self._smoothed_cross = np.zeros(bins, dtype=np.complex128)
+        self._power_work = np.empty(bins, dtype=np.float64)
+        self._cross_work = np.empty(bins, dtype=np.complex128)
+        self._weighted_cumsum = np.zeros(bins + 1, dtype=np.float64)
+        self._power_cumsum = np.zeros(bins + 1, dtype=np.float64)
         self._makeup = 1.0
 
         # 雙耳 renderer 的環繞饋給。P1 折回立體聲時 SL/SR 是 ±u（完全反相），
@@ -518,9 +522,17 @@ class SpatialUpmix:
         像有東西在呼吸。平滑係數見 :data:`SPATIAL_COHERENCE_SMOOTHING`。
         """
         alpha = self._smoothing
-        self._smoothed_m = alpha * self._smoothed_m + (1.0 - alpha) * np.abs(mid) ** 2
-        self._smoothed_s = alpha * self._smoothed_s + (1.0 - alpha) * np.abs(side) ** 2
-        self._smoothed_cross = alpha * self._smoothed_cross + (1.0 - alpha) * (mid * np.conj(side))
+        for smoothed, channel in ((self._smoothed_m, mid), (self._smoothed_s, side)):
+            np.abs(channel, out=self._power_work)
+            np.square(self._power_work, out=self._power_work)
+            self._power_work *= 1.0 - alpha
+            smoothed *= alpha
+            smoothed += self._power_work
+        np.conj(side, out=self._cross_work)
+        self._cross_work *= mid
+        self._cross_work *= 1.0 - alpha
+        self._smoothed_cross *= alpha
+        self._smoothed_cross += self._cross_work
 
         a, b, x = self._smoothed_m, self._smoothed_s, self._smoothed_cross
         half_gap = 0.5 * (a - b)
@@ -687,8 +699,11 @@ class SpatialUpmix:
         # 每一格各自算的話相鄰格的 ``w`` 差很多，相位在頻率方向上亂跳，脈衝
         # 響應鋪滿視窗而繞回負時間 —— 實測擴散瞬態前的能量被抬到 −15 dB。
         # 見 :data:`SPATIAL_CENTRE_SMOOTHING_OCTAVE`。
-        weighted = np.concatenate(([0.0], np.cumsum(centred * power)))
-        total = np.concatenate(([0.0], np.cumsum(power)))
+        weighted = self._weighted_cumsum
+        total = self._power_cumsum
+        np.multiply(centred, power, out=self._power_work)
+        np.cumsum(self._power_work, out=weighted[1:])
+        np.cumsum(power, out=total[1:])
         low, high = self._weight_low, self._weight_high
         weight = (weighted[high] - weighted[low]) / np.maximum(total[high] - total[low], _EPS)
         shared = np.exp(weight * (log_magnitude + 1j * phase))

@@ -108,8 +108,10 @@ R3 不是獨立聲源分離評分，不把單一指標當自然度結論；需�
 - 保留 `PROJECT_PLAN.md` 歷史與章節引用；日常 agent 不需要整檔讀取。
 - Spatial / Reflections 的 amount、HRTF kernels 以同一 graph block 快照發布；
   測試注入兩級間的 UI 更新，確認不混合新舊控制。
+- 反射 overlap-save FFT 與 Spatial covariance/cumsum 重用工作區；隨機分塊、
+  取樣率、雙耳模式與精確 bypass 的固定種子生成式測試，新增 branch coverage gate。
 - 仍需獨立驗收：延遲對齊交叉淡化、剩餘 callback
-  配置量測、視覺基準、coverage/property-based gate、tag ruleset 管理權限、
+  配置量測、視覺基準、tag ruleset 管理權限、
   R3 跨曲風盲測、實機 deadline／安裝器。Rust 遷移待實測瓶頸決定，不能當作音質改善。
 
 ## 目前仍需人工／特定環境

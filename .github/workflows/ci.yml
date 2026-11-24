@@ -150,7 +150,10 @@ jobs:
       # -m "not audio" 排除會實際開啟音訊裝置的測試；runner 沒有音效卡。
       # -rs 讓 skip 的原因出現在 log 裡 —— 大量 skip 是套件縮水的徵兆。
       - name: pytest
-        run: uv run pytest -m "not audio" -rs
+        run: uv run --locked coverage run --branch --source=aurora -m pytest -m "not audio" -rs
+
+      - name: Core and audio branch coverage
+        run: uv run --locked coverage report --include="*/core/*,*/audio/*" --show-missing --fail-under=80
 
       # Python 的 gate 一行 QML 都不看，這是唯一覆蓋 QML 的自動化檢查。
       # 它只證明「載得起來」，不證明畫面正確。
@@ -262,7 +265,10 @@ jobs:
       # test_endpoint.py 整檔會依 skipif 跳過（Windows 專屬），這是預期的。
       # 真正要看的是 core/ library/ audio/ 與 platform 契約在 macOS 上都綠。
       - name: pytest
-        run: uv run pytest -m "not audio" -rs
+        run: uv run --locked coverage run --branch --source=aurora -m pytest -m "not audio" -rs
+
+      - name: Core and audio branch coverage
+        run: uv run --locked coverage report --include="*/core/*,*/audio/*" --show-missing --fail-under=80
 
       # 這一條是 macOS job 的重點：它會實例化所有控制器（因此走過
       # platform adapter 的選擇路徑）並載入全部 QML 與著色器。

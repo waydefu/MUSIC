@@ -281,6 +281,9 @@ class EarlyReflections:
         self._summed = np.zeros((self._capacity, channels))
         self._feed = np.zeros((self._capacity, channels))
         self._pad = np.zeros((longest + self._capacity, channels))
+        self._fft_input = np.zeros(self._nfft, dtype=np.float64)
+        self._fft_spectrum = np.empty(self._nfft // 2 + 1, dtype=np.complex128)
+        self._fft_output = np.empty(self._nfft, dtype=np.float64)
         self._build_binaural_kernels()
 
     def _build_binaural_kernels(self) -> None:
@@ -494,7 +497,12 @@ class EarlyReflections:
             pad = self._pad[: overlap + frames, channel]
             pad[:overlap] = tail[:, channel]
             pad[overlap:] = signal[:, channel]
-            full = np.fft.irfft(np.fft.rfft(pad, self._nfft) * spectrum, self._nfft)
-            signal[:, channel] = full[overlap : overlap + frames]
+            used = overlap + frames
+            self._fft_input[:used] = pad
+            self._fft_input[used:] = 0.0
+            np.fft.rfft(self._fft_input, out=self._fft_spectrum)
+            self._fft_spectrum *= spectrum
+            np.fft.irfft(self._fft_spectrum, n=self._nfft, out=self._fft_output)
+            signal[:, channel] = self._fft_output[overlap:used]
             tail[:, channel] = pad[frames:]
         return signal

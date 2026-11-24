@@ -17,6 +17,7 @@ aurora = "aurora.__main__:main"
 
 [dependency-groups]
 dev = [
+    "coverage==7.13.4",
     "editables>=0.5",
     "pytest>=8.0",
     "ruff>=0.6",
