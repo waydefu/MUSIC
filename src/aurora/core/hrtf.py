@@ -82,6 +82,7 @@ SL/SR 就是 ±u（完全反相），那在立體聲下只是加寬；但反相�
 from __future__ import annotations
 
 import math
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -94,6 +95,7 @@ from aurora.core.constants import (
     HRTF_EQ_LIMIT_DB,
     HRTF_EQ_SMOOTHING_OCTAVE,
     HRTF_FRONT_AZIMUTH_DEG,
+    HRTF_MAX_PROFILE_BYTES,
     HRTF_MAX_TAP_RATIO,
     HRTF_SHADOW_MIN_GAIN,
     HRTF_SURROUND_AZIMUTH_DEG,
@@ -526,9 +528,13 @@ def load_filters(sample_rate: int, fft_size: int, path: Path | None = None) -> H
     """
     target = path or hrtf_file()
     try:
-        if not target.is_file():
+        if not target.is_file() or target.stat().st_size > HRTF_MAX_PROFILE_BYTES:
             return None
-        with np.load(target) as data:
+        # npz 為 ZIP；先查未壓縮大小，避免小檔案解壓成過大的矩陣。
+        with zipfile.ZipFile(target) as archive:
+            if sum(item.file_size for item in archive.infolist()) > HRTF_MAX_PROFILE_BYTES:
+                return None
+        with np.load(target, allow_pickle=False) as data:
             if any(key not in data for key in _REQUIRED_KEYS):
                 return None
             source_rate = int(data["sample_rate"])

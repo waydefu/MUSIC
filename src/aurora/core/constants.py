@@ -460,3 +460,6 @@ ENDPOINT_RATE_CONFIRM_POLLS: Final = 2
 SEEK_STEP_SEC: Final = 5.0
 #: 音量快捷鍵的步進。
 VOLUME_STEP: Final = 0.05
+
+#: 匯入的水平面 HRIR profile 解壓縮後容量上限；不是 SOFA 原始資料集上限。
+HRTF_MAX_PROFILE_BYTES: Final = 64 * 1024 * 1024

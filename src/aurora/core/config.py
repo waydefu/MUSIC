@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
@@ -157,7 +158,9 @@ class Config:
             and math.isfinite(finite(value, math.nan))
         ]
         self.eq_gains = gains if len(gains) == len(EQ_BAND_HZ) else [0.0] * len(EQ_BAND_HZ)
-        self.spatial_amount = min(max(finite(self.spatial_amount, defaults.spatial_amount), 0.0), 1.0)
+        self.spatial_amount = min(
+            max(finite(self.spatial_amount, defaults.spatial_amount), 0.0), 1.0
+        )
         self.binaural = bool(self.binaural)
         self.hrtf_profile = str(self.hrtf_profile or "")
         self.hrtf_accuracy = min(max(finite(self.hrtf_accuracy, defaults.hrtf_accuracy), 0.0), 1.0)
@@ -201,9 +204,7 @@ def save_config(config: Config, path: Path | None = None) -> bool:
         )
         os.replace(temporary, target)
     except (OSError, TypeError, ValueError, OverflowError):
-        try:
+        with contextlib.suppress(OSError):
             temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
         return False
     return True

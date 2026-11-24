@@ -245,7 +245,12 @@ def render_arm(
     spatial = None
     reflections = None
     if arm.spatial_amount > 0:
-        spatial = DiagnosticSpatial(arm)
+        if arm.spatial_mode == "current" and arm.adaptive_makeup:
+            spatial = SpatialUpmix()
+            spatial.binaural = True
+            spatial.depth_db = arm.depth_db
+        else:
+            spatial = DiagnosticSpatial(arm)
         spatial.amount = arm.spatial_amount
         spatial.hrtf_profile = profile
         spatial.cue_strength = 1.0

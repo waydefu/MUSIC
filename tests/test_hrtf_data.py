@@ -544,3 +544,13 @@ def test_invalid_hrtf_arrays_fall_back(tmp_path: Path, defect: str) -> None:
 @pytest.mark.parametrize("name", ["../outside", "..\\outside", "/absolute", "C:outside"])
 def test_profile_name_cannot_escape_profile_directory(name: str) -> None:
     assert hrtf_module.profile_path(name) is None
+
+def test_profile_archive_size_guard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "compressed.npz"
+    np.savez_compressed(
+        path, sample_rate=RATE, azimuths=np.array([0.0, 30.0, 110.0]),
+        ipsi=np.ones((3, 256)), contra=np.ones((3, 256)),
+    )
+    monkeypatch.setattr(hrtf_module, "HRTF_MAX_PROFILE_BYTES", 2048)
+    assert path.stat().st_size < 2048
+    assert load_filters(RATE, FFT, path) is None
