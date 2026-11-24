@@ -11,7 +11,7 @@
 #
 # 刻意**不**在每次 CI 都跑的東西（見 PROJECT_PLAN.md §6.1）：
 #   * -m "audio" 的測試 —— runner 沒有音訊裝置
-#   * frozen bundle verify —— 只有封裝敏感的 PR 才在各平台 job 內條件式執行
+#   * frozen bundle verify —— 封裝敏感 PR、每週定期與手動觸發執行
 #   * benchmark 的權威數字 —— hosted runner 是共用 VM，尾端數字不可信
 
 name: CI
@@ -26,6 +26,8 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: '23 2 * * 2'
 
 # 同一個分支連續推送時，取消還在跑的舊 run。
 concurrency:
@@ -55,7 +57,7 @@ jobs:
           enable-cache: true
 
       - name: 同步相依
-        run: uv sync --dev
+        run: uv sync --locked --dev
 
       - name: 判定 Windows 封裝 gate
         id: packaging
@@ -67,7 +69,7 @@ jobs:
         run: |
           changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
           printf '%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -Eq '^(\.github/workflows/ci\.yml|pyproject\.toml|uv\.lock|aurora\.spec|tools/(build_exe|pyinstaller_gate)\.py|src/aurora/__init__\.py|src/aurora/__main__\.py|src/aurora/core/paths\.py|src/aurora/platform/|src/aurora/platform_win/|src/aurora/qml/|data/)'; then
+          if printf '%s\n' "$changed" | grep -Eq '^(\.github/workflows/ci\.yml|pyproject\.toml|uv\.lock|aurora\.spec|tools/(build_exe|pyinstaller_gate)\.py|src/aurora/__init__\.py|src/aurora/__main__\.py|src/aurora/|packaging/|tools/make_release\.py|data/)'; then
             echo "required=true" >> "$GITHUB_OUTPUT"
             echo "Windows frozen bundle verification required."
           else
@@ -145,7 +147,7 @@ jobs:
       # 封裝敏感 PR 必須在真正 frozen 的 EXE 內再驗一次 QML、platform adapter、
       # 必要 DLL/CFFI 模組與禁止的 Qt 贅重內容。這不是每個 PR 都跑的昂貴 gate。
       - name: Windows frozen bundle 驗證
-        if: github.event_name == 'pull_request' && steps.packaging.outputs.required == 'true'
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.packaging.outputs.required == 'true'
         env:
           QT_QPA_PLATFORM: offscreen
         run: uv run python tools/build_exe.py --verify
@@ -171,7 +173,7 @@ jobs:
           enable-cache: true
 
       - name: 同步相依
-        run: uv sync --dev
+        run: uv sync --locked --dev
 
       - name: 判定 macOS 封裝 gate
         id: packaging
@@ -255,5 +257,5 @@ jobs:
         run: uv run aurora --validate-qml
 
       - name: macOS frozen bundle 驗證
-        if: github.event_name == 'pull_request' && steps.packaging.outputs.required == 'true'
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.packaging.outputs.required == 'true'
         run: uv run python tools/build_app.py --verify
